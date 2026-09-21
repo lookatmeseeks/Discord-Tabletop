@@ -1,0 +1,20 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "discord-tabletop-sync",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-22",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TABLETOP_ROOM",
+        "class_name": "TabletopRoom"
+      }
+    ]
+  },
+  "exports": {
+    "TabletopRoom": {
+      "type": "durable-object",
+      "storage": "sqlite"
+    }
+  }
+}
