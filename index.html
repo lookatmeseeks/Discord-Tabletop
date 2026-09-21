@@ -1,0 +1,95 @@
+<!doctype html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tabletop</title>
+
+    <style>
+        html, body {
+            margin: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #202225;
+            font-family: Arial, sans-serif;
+        }
+
+        #board {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            background: repeating-linear-gradient( 0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px ), repeating-linear-gradient( 90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px ), #35513f;
+        }
+
+        .piece {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            background: white;
+            border: 3px solid #222;
+            cursor: grab;
+            user-select: none;
+            touch-action: none;
+        }
+
+            .piece:active {
+                cursor: grabbing;
+            }
+    </style>
+</head>
+
+<body>
+
+    <div id="board">
+
+        <div class="piece" style="left:20%; top:30%;">A</div>
+        <div class="piece" style="left:35%; top:65%;">B</div>
+        <div class="piece" style="left:65%; top:30%;">C</div>
+        <div class="piece" style="left:80%; top:65%;">D</div>
+
+    </div>
+
+    <script>
+const board = document.getElementById("board");
+const pieces = document.querySelectorAll(".piece");
+
+pieces.forEach(piece => {
+
+  let dragging = false;
+
+  piece.addEventListener("pointerdown", event => {
+    dragging = true;
+    piece.setPointerCapture(event.pointerId);
+  });
+
+  piece.addEventListener("pointermove", event => {
+    if (!dragging) return;
+
+    const rect = board.getBoundingClientRect();
+
+    let x = event.clientX - rect.left;
+    let y = event.clientY - rect.top;
+
+    x = Math.max(0, Math.min(rect.width, x));
+    y = Math.max(0, Math.min(rect.height, y));
+
+    piece.style.left = `${x / rect.width * 100}%`;
+    piece.style.top = `${y / rect.height * 100}%`;
+  });
+
+  piece.addEventListener("pointerup", () => {
+    dragging = false;
+  });
+
+});
+    </script>
+
+</body>
+</html>
