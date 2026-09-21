@@ -11,6 +11,12 @@
       }
     ]
   },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TabletopRoom"]
+    }
+  ],
   "exports": {
     "TabletopRoom": {
       "type": "durable-object",
