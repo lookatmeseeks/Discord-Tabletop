@@ -72,7 +72,8 @@
 
     <script type="module">
         const CLIENT_ID = "1551720640329814118";
-        const WORKER_URL = "wss://discord-tabletop.animeister86.workers.dev/websocket";
+        const DIRECT_WORKER_URL = "wss://discord-tabletop.animeister86.workers.dev/websocket";
+        const ACTIVITY_PROXY_PATH = "/sync/websocket";
         const status = document.getElementById("status");
         const board = document.getElementById("board");
         const pieces = document.querySelectorAll(".piece");
@@ -105,7 +106,12 @@
         }
 
         function connectToRoom(roomId) {
-            const url = `${WORKER_URL}?room=${encodeURIComponent(roomId)}`;
+            const isDiscordActivity = window.location.hostname.endsWith(".discordsays.com");
+            const baseUrl = isDiscordActivity
+                ? (window.location.protocol === "https:" ? "wss:" : "ws:") + "//" + window.location.host + ACTIVITY_PROXY_PATH
+                : DIRECT_WORKER_URL;
+            const url = `${baseUrl}?room=${encodeURIComponent(roomId)}`;
+            console.log("Connecting multiplayer WebSocket:", url);
             socket = new WebSocket(url);
 
             socket.addEventListener("open", () => {
@@ -122,13 +128,15 @@
                 }
             });
 
-            socket.addEventListener("close", () => {
-                setStatus("Disconnected — retrying…");
+            socket.addEventListener("close", event => {
+                console.warn("WebSocket closed", event.code, event.reason);
+                setStatus(`Disconnected (${event.code}) — retrying…`);
                 setTimeout(() => connectToRoom(roomId), 1500);
             });
 
-            socket.addEventListener("error", () => {
-                setStatus("Connection error");
+            socket.addEventListener("error", event => {
+                console.error("WebSocket connection error", event);
+                setStatus("Connection error — check Activity URL mapping");
             });
         }
 
@@ -142,7 +150,7 @@
                 await discordSdk.ready();
 
                 connectedToDiscord = true;
-                setStatus("Discord connected");
+                setStatus(`Discord connected (${discordSdk.instanceId})`);
                 connectToRoom(discordSdk.instanceId);
             } catch (error) {
                 console.warn("Discord SDK unavailable; using local test mode.", error);
