@@ -56,40 +56,119 @@
 
     </div>
 
-    <script>
+    <script type="module">
+const CLIENT_ID = "1551720640329814118";
+const DISCORD_HOST = location.hostname.endsWith(".discordsays.com");
+const MULTIPLAYER_PATH = "/ws";
+
 const board = document.getElementById("board");
-const pieces = document.querySelectorAll(".piece");
+const pieces = [...document.querySelectorAll(".piece")];
+const initialState = {
+  A: { x: 20, y: 30 },
+  B: { x: 35, y: 65 },
+  C: { x: 65, y: 30 },
+  D: { x: 80, y: 65 }
+};
+
+let state = structuredClone(initialState);
+let socket = null;
+let localDrag = null;
+let suppressBroadcast = false;
+
+function applyState(next) {
+  state = next;
+  pieces.forEach(piece => {
+    const p = state[piece.textContent.trim()];
+    if (!p) return;
+    piece.style.left = `${p.x}%`;
+    piece.style.top = `${p.y}%`;
+  });
+}
+
+function updatePieceFromPointer(piece, event) {
+  const rect = board.getBoundingClientRect();
+  const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+  const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+  const id = piece.textContent.trim();
+  state[id] = {
+    x: x / rect.width * 100,
+    y: y / rect.height * 100
+  };
+  applyState(state);
+}
+
+function sendState() {
+  if (!socket || socket.readyState !== WebSocket.OPEN || suppressBroadcast) return;
+  socket.send(JSON.stringify({ type: "state", state }));
+}
 
 pieces.forEach(piece => {
-
-  let dragging = false;
-
   piece.addEventListener("pointerdown", event => {
-    dragging = true;
+    localDrag = piece;
     piece.setPointerCapture(event.pointerId);
   });
 
   piece.addEventListener("pointermove", event => {
-    if (!dragging) return;
-
-    const rect = board.getBoundingClientRect();
-
-    let x = event.clientX - rect.left;
-    let y = event.clientY - rect.top;
-
-    x = Math.max(0, Math.min(rect.width, x));
-    y = Math.max(0, Math.min(rect.height, y));
-
-    piece.style.left = `${x / rect.width * 100}%`;
-    piece.style.top = `${y / rect.height * 100}%`;
+    if (localDrag !== piece) return;
+    updatePieceFromPointer(piece, event);
   });
 
   piece.addEventListener("pointerup", () => {
-    dragging = false;
+    if (localDrag === piece) {
+      localDrag = null;
+      sendState();
+    }
   });
 
+  piece.addEventListener("pointercancel", () => {
+    localDrag = null;
+  });
 });
-    </script>
+
+async function startMultiplayer() {
+  if (!DISCORD_HOST) {
+    applyState(state);
+    return;
+  }
+
+  try {
+    const { DiscordSDK } = await import("/sdk/npm/@discord/embedded-app-sdk@2.5.0/+esm");
+    const discordSdk = new DiscordSDK(CLIENT_ID);
+    await discordSdk.ready();
+
+    const instanceId = discordSdk.instanceId;
+    const wsUrl = `wss://${CLIENT_ID}.discordsays.com${MULTIPLAYER_PATH}?instanceId=${encodeURIComponent(instanceId)}`;
+    socket = new WebSocket(wsUrl);
+
+    socket.addEventListener("open", () => {
+      console.log("Multiplayer connected", instanceId);
+    });
+
+    socket.addEventListener("message", event => {
+      const message = JSON.parse(event.data);
+      if (message.type === "state") {
+        suppressBroadcast = true;
+        applyState(message.state);
+        suppressBroadcast = false;
+      }
+    });
+
+    socket.addEventListener("close", () => {
+      console.log("Multiplayer disconnected");
+    });
+
+    socket.addEventListener("error", error => {
+      console.error("Multiplayer error", error);
+    });
+  } catch (error) {
+    console.error("Discord multiplayer setup failed", error);
+    applyState(state);
+  }
+}
+
+applyState(state);
+startMultiplayer();
+</script>
 
 </body>
 </html>
