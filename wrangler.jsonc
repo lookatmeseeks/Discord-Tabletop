@@ -2,7 +2,7 @@
   "$schema": "https://developers.cloudflare.com/workers/wrangler/config-schema.json",
   "name": "discord-tabletop",
   "main": "worker/src/index.js",
-  "compatibility_date": "2026-09-22",
+  "compatibility_date": "2026-09-21",
   "durable_objects": {
     "bindings": [
       {
