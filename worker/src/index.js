@@ -189,6 +189,29 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "lock") {
+      const id = data.objectId;
+      if (!id || typeof data.locked !== "boolean") return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle") return;
+
+      object.locked = data.locked;
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "lock",
+        objectId: object.id,
+        locked: object.locked
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try { connected.send(payload); } catch { this.sessions.delete(connected); }
+      }
+      return;
+    }
+
     if (data?.type === "resize") {
       const id = data.objectId;
       const width = Number(data.width);
