@@ -3,6 +3,15 @@ import { DurableObject } from "cloudflare:workers";
 const DEFAULT_STATE = {
   version: 3,
   objects: []
+};
+
+const SAVE_KEY = "default";
+
+function cloneState(state) {
+  return structuredClone({
+    version: 3,
+    objects: (state?.objects || []).filter(object => object?.type === "rectangle")
+  });
 }
 
 export default {
@@ -32,6 +41,7 @@ export default {
 export class TabletopRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
     this.state = null;
     this.sessions = new Map();
 
@@ -47,23 +57,51 @@ export class TabletopRoom extends DurableObject {
     );
   }
 
+  async getSavedState() {
+    const id = this.env.TABLETOP_SAVE.idFromName(SAVE_KEY);
+    const response = await this.env.TABLETOP_SAVE.get(id).fetch("https://tabletop-save/state");
+
+    if (!response.ok) {
+      throw new Error(`Could not load saved board: HTTP ${response.status}`);
+    }
+
+    const saved = await response.json();
+    if (saved?.version === 3 && Array.isArray(saved.objects)) {
+      return cloneState(saved);
+    }
+
+    return structuredClone(DEFAULT_STATE);
+  }
+
   async getState() {
     if (this.state) return this.state;
 
-    const stored = await this.ctx.storage.get("state");
-
-    if (stored?.version === 3 && Array.isArray(stored.objects)) {
-      this.state = stored;
-    } else {
-      this.state = structuredClone(DEFAULT_STATE);
-      await this.ctx.storage.put("state", this.state);
-    }
-
+    this.state = await this.getSavedState();
     return this.state;
   }
 
-  async saveState() {
-    await this.ctx.storage.put("state", this.state);
+  async saveBoard() {
+    const snapshot = cloneState(this.state);
+    const id = this.env.TABLETOP_SAVE.idFromName(SAVE_KEY);
+    const response = await this.env.TABLETOP_SAVE.get(id).fetch("https://tabletop-save/state", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(snapshot)
+    });
+
+    if (!response.ok) {
+      throw new Error(`Could not save board: HTTP ${response.status}`);
+    }
+  }
+
+  broadcast(payload) {
+    for (const connected of this.sessions.keys()) {
+      try {
+        connected.send(payload);
+      } catch {
+        this.sessions.delete(connected);
+      }
+    }
   }
 
   async fetch(request) {
@@ -98,6 +136,24 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "save") {
+      try {
+        await this.saveBoard();
+        this.broadcast(JSON.stringify({
+          type: "saved",
+          savedAt: new Date().toISOString()
+        }));
+      } catch (error) {
+        try {
+          ws.send(JSON.stringify({
+            type: "saveError",
+            message: error instanceof Error ? error.message : "Could not save board."
+          }));
+        } catch {}
+      }
+      return;
+    }
+
     if (data?.type === "addRectangle") {
       const state = await this.getState();
       const object = {
@@ -111,12 +167,8 @@ export class TabletopRoom extends DurableObject {
       };
 
       state.objects.push(object);
-      await this.saveState();
 
-      const payload = JSON.stringify({ type: "objectAdded", object });
-      for (const connected of this.sessions.keys()) {
-        try { connected.send(payload); } catch { this.sessions.delete(connected); }
-      }
+      this.broadcast(JSON.stringify({ type: "objectAdded", object }));
       return;
     }
 
@@ -130,20 +182,11 @@ export class TabletopRoom extends DurableObject {
       if (index === -1) return;
 
       state.objects.splice(index, 1);
-      await this.saveState();
 
-      const payload = JSON.stringify({
+      this.broadcast(JSON.stringify({
         type: "deleted",
         objectId: id
-      });
-
-      for (const connected of this.sessions.keys()) {
-        try {
-          connected.send(payload);
-        } catch {
-          this.sessions.delete(connected);
-        }
-      }
+      }));
 
       return;
     }
@@ -169,23 +212,13 @@ export class TabletopRoom extends DurableObject {
       object.aspectRatio = imageWidth / imageHeight;
       object.height = object.width / object.aspectRatio;
 
-      await this.saveState();
-
-      const payload = JSON.stringify({
+      this.broadcast(JSON.stringify({
         type: "asset",
         objectId: object.id,
         assetType: "texture",
         path,
         aspectRatio: object.aspectRatio
-      });
-
-      for (const connected of this.sessions.keys()) {
-        try {
-          connected.send(payload);
-        } catch {
-          this.sessions.delete(connected);
-        }
-      }
+      }));
 
       return;
     }
@@ -199,17 +232,12 @@ export class TabletopRoom extends DurableObject {
       if (!object || object.type !== "rectangle") return;
 
       object.locked = data.locked;
-      await this.saveState();
 
-      const payload = JSON.stringify({
+      this.broadcast(JSON.stringify({
         type: "lock",
         objectId: object.id,
         locked: object.locked
-      });
-
-      for (const connected of this.sessions.keys()) {
-        try { connected.send(payload); } catch { this.sessions.delete(connected); }
-      }
+      }));
       return;
     }
 
@@ -223,17 +251,12 @@ export class TabletopRoom extends DurableObject {
       if (!object || object.type !== "rectangle") return;
 
       object.layer = layer;
-      await this.saveState();
 
-      const payload = JSON.stringify({
+      this.broadcast(JSON.stringify({
         type: "layer",
         objectId: object.id,
         layer: object.layer
-      });
-
-      for (const connected of this.sessions.keys()) {
-        try { connected.send(payload); } catch { this.sessions.delete(connected); }
-      }
+      }));
       return;
     }
 
@@ -250,18 +273,13 @@ export class TabletopRoom extends DurableObject {
       object.width = Math.max(30, Math.min(1000, width));
       object.height = object.width / object.aspectRatio;
 
-      await this.saveState();
-
-      const payload = JSON.stringify({
+      this.broadcast(JSON.stringify({
         type: "resize",
         objectId: object.id,
         width: object.width,
         height: object.height
-      });
+      }));
 
-      for (const connected of this.sessions.keys()) {
-        try { connected.send(payload); } catch { this.sessions.delete(connected); }
-      }
       return;
     }
 
@@ -281,26 +299,50 @@ export class TabletopRoom extends DurableObject {
     object.x = Math.max(0, Math.min(100, x));
     object.y = Math.max(0, Math.min(100, y));
 
-    await this.saveState();
-
-    const payload = JSON.stringify({
+    this.broadcast(JSON.stringify({
       type: "move",
       objectId: object.id,
       x: object.x,
       y: object.y
-    });
-
-    for (const connected of this.sessions.keys()) {
-      try {
-        connected.send(payload);
-      } catch {
-        this.sessions.delete(connected);
-      }
-    }
+    }));
   }
 
   async webSocketClose(ws, code, reason) {
     this.sessions.delete(ws);
     ws.close(code, reason);
+  }
+}
+
+export class TabletopSave extends DurableObject {
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    if (url.pathname !== "/state") {
+      return new Response("Not found.", { status: 404 });
+    }
+
+    if (request.method === "GET") {
+      const saved = await this.ctx.storage.get("state");
+      return Response.json(saved || DEFAULT_STATE);
+    }
+
+    if (request.method === "POST") {
+      let state;
+
+      try {
+        state = await request.json();
+      } catch {
+        return new Response("Invalid JSON.", { status: 400 });
+      }
+
+      if (state?.version !== 3 || !Array.isArray(state.objects)) {
+        return new Response("Invalid board state.", { status: 400 });
+      }
+
+      await this.ctx.storage.put("state", cloneState(state));
+      return new Response(null, { status: 204 });
+    }
+
+    return new Response("Method not allowed.", { status: 405 });
   }
 }
