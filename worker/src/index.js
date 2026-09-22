@@ -1,12 +1,43 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DEFAULT_STATE = {
-  pieces: {
-    A: { x: 15, y: 20 },
-    B: { x: 35, y: 35 },
-    C: { x: 55, y: 50 },
-    D: { x: 75, y: 65 }
-  }
+  objects: [
+    {
+      id: "circle-1",
+      type: "circle",
+      x: 20,
+      y: 30,
+      width: 60,
+      height: 60,
+      text: "A"
+    },
+    {
+      id: "rectangle-1",
+      type: "rectangle",
+      x: 50,
+      y: 50,
+      width: 160,
+      height: 80
+    },
+    {
+      id: "image-1",
+      type: "image",
+      x: 75,
+      y: 30,
+      width: 80,
+      height: 80,
+      image: "assets/characters/wizard.png"
+    },
+    {
+      id: "text-1",
+      type: "text",
+      x: 50,
+      y: 75,
+      text: "Hello tabletop",
+      width: 160,
+      height: 40
+    }
+  ]
 };
 
 export default {
@@ -55,7 +86,13 @@ export class TabletopRoom extends DurableObject {
     if (this.state) return this.state;
 
     const stored = await this.ctx.storage.get("state");
-    this.state = stored ?? structuredClone(DEFAULT_STATE);
+
+    if (stored?.objects) {
+      this.state = stored;
+    } else {
+      this.state = structuredClone(DEFAULT_STATE);
+      await this.ctx.storage.put("state", this.state);
+    }
 
     return this.state;
   }
@@ -98,26 +135,27 @@ export class TabletopRoom extends DurableObject {
 
     if (data?.type !== "move") return;
 
-    const id = data.pieceId;
+    const id = data.objectId;
     const x = Number(data.x);
     const y = Number(data.y);
 
-    if (!["A", "B", "C", "D"].includes(id)) return;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (!id || !Number.isFinite(x) || !Number.isFinite(y)) return;
 
     const state = await this.getState();
-    state.pieces[id] = {
-      x: Math.max(0, Math.min(100, x)),
-      y: Math.max(0, Math.min(100, y))
-    };
+    const object = state.objects.find(item => item.id === id);
+
+    if (!object) return;
+
+    object.x = Math.max(0, Math.min(100, x));
+    object.y = Math.max(0, Math.min(100, y));
 
     await this.saveState();
 
     const payload = JSON.stringify({
       type: "move",
-      pieceId: id,
-      x: state.pieces[id].x,
-      y: state.pieces[id].y
+      objectId: object.id,
+      x: object.x,
+      y: object.y
     });
 
     for (const connected of this.sessions.keys()) {
