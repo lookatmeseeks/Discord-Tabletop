@@ -236,6 +236,13 @@
                     lock.onpointerdown = event => event.stopPropagation();
                     lock.onchange = event => {
                         object.locked = event.target.checked;
+                        if (socket && socket.readyState === WebSocket.OPEN) {
+                            socket.send(JSON.stringify({
+                                type: "lock",
+                                objectId: object.id,
+                                locked: object.locked
+                            }));
+                        }
                     };
                     element.appendChild(lock);
 
@@ -276,6 +283,7 @@
         }
 
         function startResize(event, object, element) {
+            if (object.locked) return;
             event.preventDefault();
             event.stopPropagation();
 
@@ -341,6 +349,9 @@
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
                 if (event.target.classList.contains("resize-handle")) return;
+
+                const object = window.currentState?.objects?.find(item => item.id === objectId);
+                if (object?.locked) return;
 
                 selectedObjectId = objectId;
                 for (const item of board.querySelectorAll(".object")) item.classList.toggle("selected", item.dataset.object === objectId);
@@ -553,6 +564,14 @@
                             object.texture = data.path;
                             object.aspectRatio = data.aspectRatio;
                             object.height = object.width / object.aspectRatio;
+                            renderState(window.currentState);
+                        }
+                    }
+
+                    if (data.type === "lock") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            object.locked = Boolean(data.locked);
                             renderState(window.currentState);
                         }
                     }
