@@ -1,44 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DEFAULT_STATE = {
-  objects: [
-    {
-      id: "circle-1",
-      type: "circle",
-      x: 20,
-      y: 30,
-      width: 60,
-      height: 60,
-      text: "A"
-    },
-    {
-      id: "rectangle-1",
-      type: "rectangle",
-      x: 50,
-      y: 50,
-      width: 160,
-      height: 80
-    },
-    {
-      id: "image-1",
-      type: "image",
-      x: 75,
-      y: 30,
-      width: 80,
-      height: 80,
-      image: "assets/characters/wizard.png"
-    },
-    {
-      id: "text-1",
-      type: "text",
-      x: 50,
-      y: 75,
-      text: "Hello tabletop",
-      width: 160,
-      height: 40
-    }
-  ]
-};
+  version: 2,
+  objects: []
+}
 
 export default {
   async fetch(request, env) {
@@ -87,7 +52,7 @@ export class TabletopRoom extends DurableObject {
 
     const stored = await this.ctx.storage.get("state");
 
-    if (stored?.objects) {
+    if (stored?.version === 2 && Array.isArray(stored.objects)) {
       this.state = stored;
     } else {
       this.state = structuredClone(DEFAULT_STATE);
@@ -133,34 +98,56 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "addRectangle") {
+      const state = await this.getState();
+      const object = {
+        id: "rectangle-" + crypto.randomUUID(),
+        type: "rectangle",
+        x: Number.isFinite(Number(data.x)) ? Math.max(0, Math.min(100, Number(data.x))) : 50,
+        y: Number.isFinite(Number(data.y)) ? Math.max(0, Math.min(100, Number(data.y))) : 50,
+        width: Math.max(30, Math.min(1000, Number(data.width) || 200)),
+        height: Math.max(30, Math.min(1000, Number(data.height) || 120))
+      };
+
+      state.objects.push(object);
+      await this.saveState();
+
+      const payload = JSON.stringify({ type: "objectAdded", object });
+      for (const connected of this.sessions.keys()) {
+        try { connected.send(payload); } catch { this.sessions.delete(connected); }
+      }
+      return;
+    }
+
     if (data?.type === "setAsset") {
       const id = data.objectId;
       const path = typeof data.path === "string" ? data.path : "";
 
-      if (!id || !/^assets\/(characters|textures|objects)\/.+\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
+      if (!id || !/^assets\/.+\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
         return;
       }
 
       const state = await this.getState();
       const object = state.objects.find(item => item.id === id);
 
-      if (!object || (object.type !== "rectangle" && object.type !== "image")) {
-        return;
-      }
+      if (!object || object.type !== "rectangle") return;
 
-      if (object.type === "rectangle") {
-        object.texture = path;
-      } else {
-        object.image = path;
-      }
+      const imageWidth = Number(data.imageWidth);
+      const imageHeight = Number(data.imageHeight);
+      if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) return;
+
+      object.texture = path;
+      object.aspectRatio = imageWidth / imageHeight;
+      object.height = object.width / object.aspectRatio;
 
       await this.saveState();
 
       const payload = JSON.stringify({
         type: "asset",
         objectId: object.id,
-        assetType: object.type === "rectangle" ? "texture" : "image",
-        path
+        assetType: "texture",
+        path,
+        aspectRatio: object.aspectRatio
       });
 
       for (const connected of this.sessions.keys()) {
@@ -171,6 +158,34 @@ export class TabletopRoom extends DurableObject {
         }
       }
 
+      return;
+    }
+
+    if (data?.type === "resize") {
+      const id = data.objectId;
+      const width = Number(data.width);
+      const height = Number(data.height);
+      if (!id || !Number.isFinite(width) || !Number.isFinite(height)) return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle" || !object.aspectRatio) return;
+
+      object.width = Math.max(30, Math.min(1000, width));
+      object.height = object.width / object.aspectRatio;
+
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "resize",
+        objectId: object.id,
+        width: object.width,
+        height: object.height
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try { connected.send(payload); } catch { this.sessions.delete(connected); }
+      }
       return;
     }
 
