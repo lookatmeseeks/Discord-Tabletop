@@ -231,6 +231,7 @@
                     };
                     handle.onpointerup = finishResize;
                     handle.onpointercancel = finishResize;
+                    handle.onlostpointercapture = finishResize;
                     element.appendChild(handle);
                 }
             }
@@ -278,7 +279,9 @@
         }
 
         function finishResize(event) {
-            if (!resizingObject || resizingObject.pointerId !== event.pointerId) return;
+            if (!resizingObject) return;
+            if (event && event.pointerId !== undefined && resizingObject.pointerId !== event.pointerId) return;
+
             sendResize(
                 resizingObject.object.id,
                 resizingObject.object.width,
