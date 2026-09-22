@@ -70,6 +70,17 @@
             outline-offset: 3px;
         }
 
+        .lock-toggle {
+            position: absolute;
+            top: -9px;
+            left: -9px;
+            width: 18px;
+            height: 18px;
+            margin: 0;
+            cursor: pointer;
+            z-index: 3;
+        }
+
         .resize-handle {
             position: absolute;
             right: -7px;
@@ -216,6 +227,18 @@
                     element.style.backgroundRepeat = "no-repeat";
                 }
                 if (selectedObjectId === object.id) {
+                    const lock = document.createElement("input");
+                    lock.type = "checkbox";
+                    lock.className = "lock-toggle";
+                    lock.checked = Boolean(object.locked);
+                    lock.title = "Lock frame";
+                    lock.setAttribute("aria-label", "Lock frame");
+                    lock.onpointerdown = event => event.stopPropagation();
+                    lock.onchange = event => {
+                        object.locked = event.target.checked;
+                    };
+                    element.appendChild(lock);
+
                     const handle = document.createElement("div");
                     handle.className = "resize-handle";
                     handle.onpointerdown = event => startResize(event, object, element);
