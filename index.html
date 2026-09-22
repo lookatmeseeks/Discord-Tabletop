@@ -266,6 +266,7 @@
                 ratio: object.aspectRatio || (object.width / object.height)
             };
 
+            board.setPointerCapture(event.pointerId);
             window.addEventListener("pointermove", handleResizeMove);
             window.addEventListener("pointerup", finishResize);
             window.addEventListener("pointercancel", finishResize);
@@ -292,11 +293,16 @@
             if (!resizingObject) return;
             if (event && event.pointerId !== undefined && resizingObject.pointerId !== event.pointerId) return;
 
-            const object = resizingObject.object;
+            const resizeState = resizingObject;
+            const object = resizeState.object;
 
             window.removeEventListener("pointermove", handleResizeMove);
             window.removeEventListener("pointerup", finishResize);
             window.removeEventListener("pointercancel", finishResize);
+
+            if (board.hasPointerCapture(resizeState.pointerId)) {
+                board.releasePointerCapture(resizeState.pointerId);
+            }
 
             sendResize(object.id, object.width, object.height);
             resizingObject = null;
