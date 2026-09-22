@@ -119,4 +119,140 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "delete") {
+      const id = data.objectId;
+      if (!id) return;
 
+      const state = await this.getState();
+      const index = state.objects.findIndex(item => item.id === id);
+
+      if (index === -1) return;
+
+      state.objects.splice(index, 1);
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "deleted",
+        objectId: id
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try {
+          connected.send(payload);
+        } catch {
+          this.sessions.delete(connected);
+        }
+      }
+
+      return;
+    }
+
+    if (data?.type === "setAsset") {
+      const id = data.objectId;
+      const path = typeof data.path === "string" ? data.path : "";
+
+      if (!id || !/^assets\/.+\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
+        return;
+      }
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+
+      if (!object || object.type !== "rectangle") return;
+
+      const imageWidth = Number(data.imageWidth);
+      const imageHeight = Number(data.imageHeight);
+      if (!Number.isFinite(imageWidth) || !Number.isFinite(imageHeight) || imageWidth <= 0 || imageHeight <= 0) return;
+
+      object.texture = path;
+      object.aspectRatio = imageWidth / imageHeight;
+      object.height = object.width / object.aspectRatio;
+
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "asset",
+        objectId: object.id,
+        assetType: "texture",
+        path,
+        aspectRatio: object.aspectRatio
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try {
+          connected.send(payload);
+        } catch {
+          this.sessions.delete(connected);
+        }
+      }
+
+      return;
+    }
+
+    if (data?.type === "resize") {
+      const id = data.objectId;
+      const width = Number(data.width);
+      const height = Number(data.height);
+      if (!id || !Number.isFinite(width) || !Number.isFinite(height)) return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle" || !object.aspectRatio) return;
+
+      object.width = Math.max(30, Math.min(1000, width));
+      object.height = object.width / object.aspectRatio;
+
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "resize",
+        objectId: object.id,
+        width: object.width,
+        height: object.height
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try { connected.send(payload); } catch { this.sessions.delete(connected); }
+      }
+      return;
+    }
+
+    if (data?.type !== "move") return;
+
+    const id = data.objectId;
+    const x = Number(data.x);
+    const y = Number(data.y);
+
+    if (!id || !Number.isFinite(x) || !Number.isFinite(y)) return;
+
+    const state = await this.getState();
+    const object = state.objects.find(item => item.id === id);
+
+    if (!object) return;
+
+    object.x = Math.max(0, Math.min(100, x));
+    object.y = Math.max(0, Math.min(100, y));
+
+    await this.saveState();
+
+    const payload = JSON.stringify({
+      type: "move",
+      objectId: object.id,
+      x: object.x,
+      y: object.y
+    });
+
+    for (const connected of this.sessions.keys()) {
+      try {
+        connected.send(payload);
+      } catch {
+        this.sessions.delete(connected);
+      }
+    }
+  }
+
+  async webSocketClose(ws, code, reason) {
+    this.sessions.delete(ws);
+    ws.close(code, reason);
+  }
+}
