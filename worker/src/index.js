@@ -133,6 +133,47 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "setAsset") {
+      const id = data.objectId;
+      const path = typeof data.path === "string" ? data.path : "";
+
+      if (!id || !/^assets\/(characters|textures|objects)\/.+\.(png|jpe?g|gif|webp|svg)$/i.test(path)) {
+        return;
+      }
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+
+      if (!object || (object.type !== "rectangle" && object.type !== "image")) {
+        return;
+      }
+
+      if (object.type === "rectangle") {
+        object.texture = path;
+      } else {
+        object.image = path;
+      }
+
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "asset",
+        objectId: object.id,
+        assetType: object.type === "rectangle" ? "texture" : "image",
+        path
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try {
+          connected.send(payload);
+        } catch {
+          this.sessions.delete(connected);
+        }
+      }
+
+      return;
+    }
+
     if (data?.type !== "move") return;
 
     const id = data.objectId;
