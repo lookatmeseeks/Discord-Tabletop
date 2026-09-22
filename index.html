@@ -32,9 +32,27 @@
             position: relative;
             width: 100vw;
             height: 100vh;
-            background: repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px),
-                        repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px),
-                        #35513f;
+            overflow: hidden;
+            background: #35513f;
+            cursor: default;
+            touch-action: none;
+        }
+
+        #world {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 50000px;
+            height: 50000px;
+            transform-origin: 0 0;
+            background:
+                repeating-linear-gradient(0deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px),
+                repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0 1px, transparent 1px 40px),
+                #35513f;
+        }
+
+        #board.panning {
+            cursor: grabbing;
         }
 
         .object {
@@ -186,6 +204,13 @@
 
         const status = document.getElementById("status");
         const board = document.getElementById("board");
+        const world = document.getElementById("world");
+
+        const WORLD_SIZE = 50000;
+        let cameraX = 0;
+        let cameraY = 0;
+        let zoom = 1;
+        let panning = null;
 
         let socket = null;
         let draggingObject = null;
@@ -209,7 +234,7 @@
                 element = document.createElement("div");
                 element.className = "object";
                 element.dataset.object = object.id;
-                board.appendChild(element);
+                world.appendChild(element);
             }
 
             element.className = `object ${object.type}${selectedObjectId === object.id ? " selected" : ""}`;
@@ -257,6 +282,26 @@
             }
 
             attachDragHandlers(element, object.id);
+        }
+
+        function updateCamera() {
+            const rect = board.getBoundingClientRect();
+            const scaledWorldWidth = WORLD_SIZE * zoom;
+            const scaledWorldHeight = WORLD_SIZE * zoom;
+
+            const minX = Math.min(0, rect.width - scaledWorldWidth);
+            const minY = Math.min(0, rect.height - scaledWorldHeight);
+            cameraX = Math.min(0, Math.max(minX, cameraX));
+            cameraY = Math.min(0, Math.max(minY, cameraY));
+
+            world.style.transform = `translate(${cameraX}px, ${cameraY}px) scale(${zoom})`;
+        }
+
+        function centerWorld() {
+            const rect = board.getBoundingClientRect();
+            cameraX = (rect.width - WORLD_SIZE * zoom) / 2;
+            cameraY = (rect.height - WORLD_SIZE * zoom) / 2;
+            updateCamera();
         }
 
         function renderState(state) {
@@ -351,6 +396,7 @@
 
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
+                if (event.button === 1) return;
                 if (event.target.classList.contains("resize-handle")) return;
 
                 const object = window.currentState?.objects?.find(item => item.id === objectId);
@@ -361,9 +407,8 @@
 
                 if (object.locked) return;
 
-                const rect = board.getBoundingClientRect();
-                const startX = object ? object.x : parseFloat(element.style.left) || 50;
-                const startY = object ? object.y : parseFloat(element.style.top) || 50;
+                const startX = object.x;
+                const startY = object.y;
 
                 draggingObject = {
                     element,
@@ -372,17 +417,15 @@
                     startClientX: event.clientX,
                     startClientY: event.clientY,
                     startX,
-                    startY,
-                    boardWidth: rect.width,
-                    boardHeight: rect.height
+                    startY
                 };
                 element.setPointerCapture(event.pointerId);
             };
 
             element.onpointermove = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
-                const deltaX = ((event.clientX - draggingObject.startClientX) / draggingObject.boardWidth) * 100;
-                const deltaY = ((event.clientY - draggingObject.startClientY) / draggingObject.boardHeight) * 100;
+                const deltaX = ((event.clientX - draggingObject.startClientX) / zoom) / WORLD_SIZE * 100;
+                const deltaY = ((event.clientY - draggingObject.startClientY) / zoom) / WORLD_SIZE * 100;
                 const x = Math.max(0, Math.min(100, draggingObject.startX + deltaX));
                 const y = Math.max(0, Math.min(100, draggingObject.startY + deltaY));
                 element.style.left = x + "%";
@@ -398,8 +441,8 @@
 
             element.onpointerup = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
-                const deltaX = ((event.clientX - draggingObject.startClientX) / draggingObject.boardWidth) * 100;
-                const deltaY = ((event.clientY - draggingObject.startClientY) / draggingObject.boardHeight) * 100;
+                const deltaX = ((event.clientX - draggingObject.startClientX) / zoom) / WORLD_SIZE * 100;
+                const deltaY = ((event.clientY - draggingObject.startClientY) / zoom) / WORLD_SIZE * 100;
                 const x = Math.max(0, Math.min(100, draggingObject.startX + deltaX));
                 const y = Math.max(0, Math.min(100, draggingObject.startY + deltaY));
                 sendMove(objectId, x, y);
@@ -535,6 +578,64 @@
             };
             image.src = path;
         }
+
+        board.addEventListener("wheel", event => {
+            event.preventDefault();
+
+            const rect = board.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+            const worldX = (mouseX - cameraX) / zoom;
+            const worldY = (mouseY - cameraY) / zoom;
+
+            const factor = Math.exp(-event.deltaY * 0.0015);
+            const nextZoom = Math.max(0.25, Math.min(3, zoom * factor));
+
+            cameraX = mouseX - worldX * nextZoom;
+            cameraY = mouseY - worldY * nextZoom;
+            zoom = nextZoom;
+            updateCamera();
+        }, { passive: false });
+
+        board.addEventListener("pointerdown", event => {
+            if (event.button !== 1) return;
+
+            event.preventDefault();
+            panning = {
+                pointerId: event.pointerId,
+                startClientX: event.clientX,
+                startClientY: event.clientY,
+                startCameraX: cameraX,
+                startCameraY: cameraY
+            };
+
+            board.classList.add("panning");
+            board.setPointerCapture(event.pointerId);
+        });
+
+        board.addEventListener("pointermove", event => {
+            if (!panning || panning.pointerId !== event.pointerId) return;
+
+            cameraX = panning.startCameraX + (event.clientX - panning.startClientX);
+            cameraY = panning.startCameraY + (event.clientY - panning.startClientY);
+            updateCamera();
+        });
+
+        function finishPan(event) {
+            if (!panning || panning.pointerId !== event.pointerId) return;
+
+            if (board.hasPointerCapture(panning.pointerId)) {
+                board.releasePointerCapture(panning.pointerId);
+            }
+
+            panning = null;
+            board.classList.remove("panning");
+        }
+
+        board.addEventListener("pointerup", finishPan);
+        board.addEventListener("pointercancel", finishPan);
+        board.addEventListener("contextmenu", event => event.preventDefault());
+        window.addEventListener("resize", updateCamera);
 
         addRectangleButton.onclick = addRectangle;
         deleteRectangleButton.onclick = deleteSelectedRectangle;
@@ -677,6 +778,7 @@
             }
         }
 
+        centerWorld();
         loadAssets();
         setupDiscord();
     </script>
