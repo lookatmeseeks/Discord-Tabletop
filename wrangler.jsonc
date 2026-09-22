@@ -8,6 +8,10 @@
       {
         "name": "TABLETOP_ROOM",
         "class_name": "TabletopRoom"
+      },
+      {
+        "name": "TABLETOP_SAVE",
+        "class_name": "TabletopSave"
       }
     ]
   },
@@ -15,6 +19,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["TabletopRoom"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["TabletopSave"]
     }
   ]
 }
