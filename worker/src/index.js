@@ -119,6 +119,34 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "delete") {
+      const id = data.objectId;
+      if (!id) return;
+
+      const state = await this.getState();
+      const index = state.objects.findIndex(item => item.id === id);
+
+      if (index === -1) return;
+
+      state.objects.splice(index, 1);
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "deleted",
+        objectId: id
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try {
+          connected.send(payload);
+        } catch {
+          this.sessions.delete(connected);
+        }
+      }
+
+      return;
+    }
+
     if (data?.type === "setAsset") {
       const id = data.objectId;
       const path = typeof data.path === "string" ? data.path : "";
