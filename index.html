@@ -53,6 +53,68 @@
             cursor: grabbing;
         }
 
+        .object.selected {
+            outline: 3px solid #fff;
+            outline-offset: 3px;
+        }
+
+        #assets {
+            position: fixed;
+            z-index: 110;
+            right: 10px;
+            top: 10px;
+            width: 220px;
+            max-height: calc(100vh - 20px);
+            overflow: auto;
+            padding: 10px;
+            box-sizing: border-box;
+            border-radius: 8px;
+            background: rgba(0,0,0,.78);
+            color: white;
+        }
+
+        #assets h3 {
+            margin: 0 0 8px;
+            font-size: 14px;
+        }
+
+        #assetHint {
+            margin-bottom: 8px;
+            font-size: 12px;
+            opacity: .8;
+        }
+
+        .asset-folder {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: .7;
+        }
+
+        .asset-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 5px;
+        }
+
+        .asset {
+            width: 100%;
+            aspect-ratio: 1;
+            padding: 0;
+            border: 1px solid #555;
+            border-radius: 4px;
+            background: #333;
+            overflow: hidden;
+            cursor: pointer;
+        }
+
+        .asset img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
         .object.circle {
             border-radius: 50%;
             background: white;
@@ -90,6 +152,11 @@
 
 <body>
     <div id="status">Connecting…</div>
+    <div id="assets">
+        <h3>Assets</h3>
+        <div id="assetHint">Select a rectangle or image object, then click an asset.</div>
+        <div id="assetList">Loading…</div>
+    </div>
     <div id="board"></div>
 
     <script type="module">
@@ -102,7 +169,11 @@
 
         let socket = null;
         let draggingObject = null;
+        let selectedObjectId = null;
         let lastSent = 0;
+
+        const ASSET_FOLDERS = ["characters", "textures", "objects"];
+        const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp|svg)$/i;
 
         function setStatus(text) {
             status.textContent = text;
@@ -118,13 +189,14 @@
                 board.appendChild(element);
             }
 
-            element.className = `object ${object.type}`;
+            element.className = `object ${object.type}${selectedObjectId === object.id ? " selected" : ""}`;
             element.style.left = `${object.x}%`;
             element.style.top = `${object.y}%`;
             element.style.width = object.width ? `${object.width}px` : "";
             element.style.height = object.height ? `${object.height}px` : "";
 
             element.replaceChildren();
+            element.style.backgroundImage = "";
 
             if (object.type === "circle") {
                 element.textContent = object.text || object.id;
@@ -135,8 +207,6 @@
                     element.style.backgroundImage = `url("${object.texture}")`;
                     element.style.backgroundSize = "cover";
                     element.style.backgroundRepeat = "repeat";
-                } else {
-                    element.style.backgroundImage = "";
                 }
             }
 
@@ -182,6 +252,9 @@
 
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
+                selectedObjectId = objectId;
+                if (window.currentState) renderState(window.currentState);
+
                 draggingObject = {
                     element,
                     pointerId: event.pointerId,
@@ -224,6 +297,65 @@
             };
         }
 
+        async function loadAssets() {
+            const list = document.getElementById("assetList");
+            list.textContent = "";
+
+            for (const folder of ASSET_FOLDERS) {
+                try {
+                    const response = await fetch(
+                        `https://api.github.com/repos/lookatmeseeks/Discord-Tabletop/contents/assets/${folder}`
+                    );
+
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                    const files = (await response.json())
+                        .filter(file => file.type === "file" && IMAGE_EXTENSIONS.test(file.name));
+
+                    if (!files.length) continue;
+
+                    const title = document.createElement("div");
+                    title.className = "asset-folder";
+                    title.textContent = folder;
+                    list.appendChild(title);
+
+                    const grid = document.createElement("div");
+                    grid.className = "asset-grid";
+
+                    for (const file of files) {
+                        const button = document.createElement("button");
+                        button.className = "asset";
+                        button.title = file.name;
+                        const image = document.createElement("img");
+                        image.src = file.path;
+                        image.alt = file.name;
+                        button.appendChild(image);
+
+                        button.onclick = () => applyAsset(file.path);
+                        grid.appendChild(button);
+                    }
+
+                    list.appendChild(grid);
+                } catch (error) {
+                    console.warn("Could not load assets from", folder, error);
+                }
+            }
+
+            if (!list.children.length) {
+                list.textContent = "No images found in assets/.";
+            }
+        }
+
+        function applyAsset(path) {
+            if (!selectedObjectId || !socket || socket.readyState !== WebSocket.OPEN) return;
+
+            socket.send(JSON.stringify({
+                type: "setAsset",
+                objectId: selectedObjectId,
+                path
+            }));
+        }
+
         function connectToRoom(roomId) {
             const isDiscordActivity = window.location.hostname.endsWith(".discordsays.com");
             const baseUrl = isDiscordActivity
@@ -244,7 +376,17 @@
                     const data = JSON.parse(event.data);
 
                     if (data.type === "state") {
+                        window.currentState = data.state;
                         renderState(data.state);
+                    }
+
+                    if (data.type === "asset") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            if (data.assetType === "texture") object.texture = data.path;
+                            if (data.assetType === "image") object.image = data.path;
+                            renderState(window.currentState);
+                        }
                     }
 
                     if (data.type === "move") {
@@ -288,6 +430,7 @@
             }
         }
 
+        loadAssets();
         setupDiscord();
     </script>
 </body>
