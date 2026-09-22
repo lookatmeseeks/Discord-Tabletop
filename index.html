@@ -160,7 +160,7 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add frame</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="deleteRectangle">Delete frame</button></div>
     <div id="assets">
         <h3>Assets</h3>
         <div id="assetHint">Select a frame, then click an image.</div>
@@ -183,6 +183,7 @@
         let lastSent = 0;
 
         const addRectangleButton = document.getElementById("addRectangle");
+        const deleteRectangleButton = document.getElementById("deleteRectangle");
 
         function setStatus(text) {
             status.textContent = text;
@@ -367,6 +368,28 @@
             element.onpointercancel = () => { draggingObject = null; };
         }
 
+        function deleteSelectedRectangle() {
+            if (!selectedObjectId) return;
+
+            const objectId = selectedObjectId;
+            const object = window.currentState?.objects?.find(item => item.id === objectId);
+            if (!object || object.type !== "rectangle") return;
+
+            window.currentState.objects = window.currentState.objects.filter(item => item.id !== objectId);
+            selectedObjectId = null;
+            renderState(window.currentState);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "delete",
+                    objectId
+                }));
+                setStatus("Frame deleted");
+            } else {
+                setStatus("Frame deleted locally — multiplayer not connected");
+            }
+        }
+
         function addRectangle() {
             const object = {
                 id: "local-rectangle-" + crypto.randomUUID(),
@@ -455,6 +478,7 @@
         }
 
         addRectangleButton.onclick = addRectangle;
+        deleteRectangleButton.onclick = deleteSelectedRectangle;
 
         function connectToRoom(roomId) {
             const isDiscordActivity = window.location.hostname.endsWith(".discordsays.com");
@@ -520,6 +544,14 @@
                                 renderState(window.currentState);
                             }
                         }
+                    }
+
+                    if (data.type === "deleted") {
+                        window.currentState.objects = (window.currentState.objects || []).filter(object => object.id !== data.objectId);
+                        if (selectedObjectId === data.objectId) {
+                            selectedObjectId = null;
+                        }
+                        renderState(window.currentState);
                     }
 
                     if (data.type === "move") {
