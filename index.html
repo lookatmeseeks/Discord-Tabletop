@@ -303,17 +303,14 @@
             const list = document.getElementById("assetList");
             list.textContent = "";
 
-            for (const folder of ASSET_FOLDERS) {
-                try {
-                    const response = await fetch(
-                        `https://api.github.com/repos/lookatmeseeks/Discord-Tabletop/contents/assets/${folder}`
-                    );
+            try {
+                const response = await fetch("assets/manifest.json", { cache: "no-store" });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const manifest = await response.json();
 
-                    const files = (await response.json())
-                        .filter(file => file.type === "file" && IMAGE_EXTENSIONS.test(file.name));
-
+                for (const folder of ASSET_FOLDERS) {
+                    const files = Array.isArray(manifest[folder]) ? manifest[folder] : [];
                     if (!files.length) continue;
 
                     const title = document.createElement("div");
@@ -324,27 +321,29 @@
                     const grid = document.createElement("div");
                     grid.className = "asset-grid";
 
-                    for (const file of files) {
+                    for (const path of files) {
                         const button = document.createElement("button");
                         button.className = "asset";
-                        button.title = file.name;
+                        button.title = path.split("/").pop();
+
                         const image = document.createElement("img");
-                        image.src = file.path;
-                        image.alt = file.name;
+                        image.src = path;
+                        image.alt = button.title;
                         button.appendChild(image);
 
-                        button.onclick = () => applyAsset(file.path);
+                        button.onclick = () => applyAsset(path);
                         grid.appendChild(button);
                     }
 
                     list.appendChild(grid);
-                } catch (error) {
-                    console.warn("Could not load assets from", folder, error);
                 }
-            }
 
-            if (!list.children.length) {
-                list.textContent = "No images found in assets/.";
+                if (!list.children.length) {
+                    list.textContent = "No images found in assets.";
+                }
+            } catch (error) {
+                console.error("Could not load asset manifest", error);
+                list.textContent = "Could not load assets.";
             }
         }
 
