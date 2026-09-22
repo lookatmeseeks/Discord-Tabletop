@@ -23,16 +23,12 @@ jobs:
 
           root = Path("assets")
           extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
-          manifest = {}
-
-          for folder in ("characters", "textures", "objects"):
-              directory = root / folder
-              files = []
-              if directory.exists():
-                  for path in sorted(directory.iterdir()):
-                      if path.is_file() and path.suffix.lower() in extensions:
-                          files.append(path.as_posix())
-              manifest[folder] = files
+          files = []
+          if root.exists():
+              for path in sorted(root.rglob("*")):
+                  if path.is_file() and path.suffix.lower() in extensions:
+                      files.append(path.as_posix())
+          manifest = {"assets": files}
 
           Path("assets/manifest.json").write_text(
               json.dumps(manifest, indent=2) + "\n",
