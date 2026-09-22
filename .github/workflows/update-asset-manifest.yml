@@ -1,0 +1,49 @@
+name: Update asset manifest
+
+on:
+  push:
+    paths:
+      - "assets/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build asset manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("assets")
+          extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+          manifest = {}
+
+          for folder in ("characters", "textures", "objects"):
+              directory = root / folder
+              files = []
+              if directory.exists():
+                  for path in sorted(directory.iterdir()):
+                      if path.is_file() and path.suffix.lower() in extensions:
+                          files.append(path.as_posix())
+              manifest[folder] = files
+
+          Path("assets/manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n",
+              encoding="utf-8"
+          )
+          PY
+
+      - name: Commit manifest
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add assets/manifest.json
+          git diff --cached --quiet || git commit -m "Update asset manifest"
+          git push
