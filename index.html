@@ -53,9 +53,35 @@
             cursor: grabbing;
         }
 
+        .object.rectangle {
+            background: rgba(20, 20, 20, .28);
+            border: 2px solid rgba(255, 255, 255, .55);
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .35);
+            background-clip: padding-box;
+        }
+
+        .object.rectangle.has-texture {
+            background-color: transparent;
+        }
+
         .object.selected {
             outline: 3px solid #fff;
             outline-offset: 3px;
+        }
+
+        .resize-handle {
+            position: absolute;
+            right: -7px;
+            bottom: -7px;
+            width: 14px;
+            height: 14px;
+            box-sizing: border-box;
+            border: 2px solid #fff;
+            border-radius: 3px;
+            background: #333;
+            cursor: nwse-resize;
+            z-index: 2;
         }
 
         #toolbar {
@@ -134,10 +160,10 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add rectangle</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button></div>
     <div id="assets">
         <h3>Assets</h3>
-        <div id="assetHint">Select a rectangle, then click an image.</div>
+        <div id="assetHint">Select a frame, then click an image.</div>
         <div id="assetList">Loading…</div>
     </div>
     <div id="board"></div>
@@ -181,10 +207,7 @@
             element.replaceChildren();
             element.style.backgroundImage = "";
             element.style.backgroundSize = "100% 100%";
-
-            if (object.type === "circle") {
-                element.textContent = object.text || object.id;
-            }
+            element.classList.toggle("has-texture", Boolean(object.texture));
 
             if (object.type === "rectangle") {
                 if (object.texture) {
@@ -210,17 +233,6 @@
                     handle.onpointercancel = finishResize;
                     element.appendChild(handle);
                 }
-            }
-
-            if (object.type === "image") {
-                const image = document.createElement("img");
-                image.src = object.image || "";
-                image.alt = object.id;
-                element.appendChild(image);
-            }
-
-            if (object.type === "text") {
-                element.textContent = object.text || "";
             }
 
             attachDragHandlers(element, object.id);
@@ -339,9 +351,9 @@
                     width: object.width,
                     height: object.height
                 }));
-                setStatus("Rectangle added");
+                setStatus("Frame added");
             } else {
-                setStatus("Rectangle added locally — multiplayer not connected");
+                setStatus("Frame added locally — multiplayer not connected");
             }
         }
         async function loadAssets() {
