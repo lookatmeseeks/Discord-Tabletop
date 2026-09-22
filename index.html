@@ -189,7 +189,7 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="deleteRectangle">Delete frame</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="saveBoard">Save</button> <button id="deleteRectangle">Delete frame</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
     <div id="assets">
         <h3>Assets</h3>
         <div id="assetHint">Select a frame, then click an image.</div>
@@ -222,6 +222,7 @@
         const deleteRectangleButton = document.getElementById("deleteRectangle");
         const sendBackgroundButton = document.getElementById("sendBackground");
         const sendForegroundButton = document.getElementById("sendForeground");
+        const saveBoardButton = document.getElementById("saveBoard");
 
         function setStatus(text) {
             status.textContent = text;
@@ -641,6 +642,18 @@
         deleteRectangleButton.onclick = deleteSelectedRectangle;
         sendBackgroundButton.onclick = () => setSelectedLayer("background");
         sendForegroundButton.onclick = () => setSelectedLayer("foreground");
+        saveBoardButton.onclick = saveBoard;
+
+        function saveBoard() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                setStatus("Cannot save — multiplayer not connected");
+                return;
+            }
+
+            saveBoardButton.disabled = true;
+            setStatus("Saving…");
+            socket.send(JSON.stringify({ type: "save" }));
+        }
 
         function connectToRoom(roomId) {
             const isDiscordActivity = window.location.hostname.endsWith(".discordsays.com");
@@ -654,12 +667,24 @@
             socket = new WebSocket(url);
 
             socket.addEventListener("open", () => {
+                saveBoardButton.disabled = false;
                 setStatus("Multiplayer connected");
             });
 
             socket.addEventListener("message", event => {
                 try {
                     const data = JSON.parse(event.data);
+
+                    if (data.type === "saved") {
+                        saveBoardButton.disabled = false;
+                        setStatus("Board saved");
+                    }
+
+                    if (data.type === "saveError") {
+                        saveBoardButton.disabled = false;
+                        setStatus("Save failed");
+                        console.error(data.message);
+                    }
 
                     if (data.type === "state") {
                         const serverObjects = (data.state.objects || []).filter(object => object.type === "rectangle");
@@ -750,6 +775,7 @@
             });
 
             socket.addEventListener("close", event => {
+                saveBoardButton.disabled = true;
                 console.warn("WebSocket closed", event.code, event.reason);
                 setStatus(`Disconnected (${event.code}) — retrying…`);
                 setTimeout(() => connectToRoom(roomId), 1500);
