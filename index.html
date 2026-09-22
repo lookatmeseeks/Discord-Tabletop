@@ -129,52 +129,6 @@
             pointer-events: none;
         }
 
-        .object.circle {
-            border-radius: 50%;
-            background: white;
-            border: 3px solid #222;
-            font-weight: bold;
-        }
-
-        .object.rectangle {
-            background: #777;
-            border: 3px solid #222;
-        }
-
-        .object.image {
-            background: transparent;
-        }
-
-        .object.image img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            pointer-events: none;
-        }
-
-        .resize-handle {
-            position: absolute;
-            right: -7px;
-            bottom: -7px;
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: white;
-            border: 2px solid #222;
-            box-sizing: border-box;
-            cursor: nwse-resize;
-            z-index: 5;
-        }
-
-        .object.text {
-            color: white;
-            background: rgba(0,0,0,.55);
-            border: 2px solid #222;
-            padding: 6px 10px;
-            min-width: 40px;
-            min-height: 24px;
-            white-space: nowrap;
-        }
     </style>
 </head>
 
@@ -241,6 +195,19 @@
                     const handle = document.createElement("div");
                     handle.className = "resize-handle";
                     handle.onpointerdown = event => startResize(event, object);
+                    handle.onpointermove = event => {
+                        if (!resizingObject || resizingObject.pointerId !== event.pointerId) return;
+                        const delta = event.clientX - resizingObject.startX;
+                        const width = Math.max(30, resizingObject.startWidth + delta);
+                        const height = width / resizingObject.ratio;
+                        resizingObject.object.width = width;
+                        resizingObject.object.height = height;
+                        element.style.width = width + "px";
+                        element.style.height = height + "px";
+                        sendResize(resizingObject.object.id, width, height);
+                    };
+                    handle.onpointerup = finishResize;
+                    handle.onpointercancel = finishResize;
                     element.appendChild(handle);
                 }
             }
@@ -288,8 +255,25 @@
         function startResize(event, object) {
             event.preventDefault();
             event.stopPropagation();
-            resizingObject = { object, pointerId: event.pointerId, startX: event.clientX, startWidth: object.width, ratio: object.aspectRatio || (object.width / object.height) };
+            resizingObject = {
+                object,
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startWidth: object.width,
+                ratio: object.aspectRatio || (object.width / object.height)
+            };
             event.currentTarget.setPointerCapture(event.pointerId);
+        }
+
+        function finishResize(event) {
+            if (!resizingObject || resizingObject.pointerId !== event.pointerId) return;
+            sendResize(
+                resizingObject.object.id,
+                resizingObject.object.width,
+                resizingObject.object.height
+            );
+            resizingObject = null;
+            renderState(window.currentState);
         }
 
         function sendResize(id, width, height) {
@@ -307,17 +291,6 @@
             };
 
             element.onpointermove = event => {
-                if (resizingObject && resizingObject.pointerId === event.pointerId) {
-                    const delta = event.clientX - resizingObject.startX;
-                    const width = Math.max(30, resizingObject.startWidth + delta);
-                    const height = Math.max(30, width / resizingObject.ratio);
-                    resizingObject.object.width = width;
-                    resizingObject.object.height = height;
-                    element.style.width = width + "px";
-                    element.style.height = height + "px";
-                    sendResize(resizingObject.object.id, width, height);
-                    return;
-                }
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
                 const rect = board.getBoundingClientRect();
                 const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
@@ -329,12 +302,6 @@
             };
 
             element.onpointerup = event => {
-                if (resizingObject && resizingObject.pointerId === event.pointerId) {
-                    sendResize(resizingObject.object.id, resizingObject.object.width, resizingObject.object.height);
-                    resizingObject = null;
-                    renderState(window.currentState);
-                    return;
-                }
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
                 const rect = board.getBoundingClientRect();
                 const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
@@ -342,12 +309,21 @@
                 sendMove(objectId, x, y);
                 draggingObject = null;
             };
-            element.onpointercancel = () => { draggingObject = null; resizingObject = null; };
+            element.onpointercancel = () => { draggingObject = null; };
         }
 
         function addRectangle() {
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            socket.send(JSON.stringify({ type: "addRectangle", x: 50, y: 50, width: 200, height: 120 }));
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                setStatus("Not connected");
+                return;
+            }
+            socket.send(JSON.stringify({
+                type: "addRectangle",
+                x: 50,
+                y: 50,
+                width: 200,
+                height: 120
+            }));
         }
         async function loadAssets() {
             const list = document.getElementById("assetList");
