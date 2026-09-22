@@ -70,17 +70,6 @@
             outline-offset: 3px;
         }
 
-        .lock-toggle {
-            position: absolute;
-            left: 6px;
-            top: 6px;
-            width: 18px;
-            height: 18px;
-            margin: 0;
-            cursor: pointer;
-            z-index: 3;
-        }
-
         .resize-handle {
             position: absolute;
             right: -7px;
@@ -222,23 +211,11 @@
             element.classList.toggle("has-texture", Boolean(object.texture));
 
             if (object.type === "rectangle") {
-                const lockToggle = document.createElement("input");
-                lockToggle.type = "checkbox";
-                lockToggle.className = "lock-toggle";
-                lockToggle.checked = Boolean(object.locked);
-                lockToggle.title = object.locked ? "Unlock frame" : "Lock frame";
-                lockToggle.setAttribute("aria-label", object.locked ? "Unlock frame" : "Lock frame");
-                lockToggle.onpointerdown = event => event.stopPropagation();
-                lockToggle.onclick = event => {
-                    event.stopPropagation();
-                    setLocked(object.id, lockToggle.checked);
-                };
-                element.appendChild(lockToggle);
                 if (object.texture) {
                     element.style.backgroundImage = `url("${object.texture}")`;
                     element.style.backgroundRepeat = "no-repeat";
                 }
-                if (selectedObjectId === object.id && !object.locked) {
+                if (selectedObjectId === object.id) {
                     const handle = document.createElement("div");
                     handle.className = "resize-handle";
                     handle.onpointerdown = event => startResize(event, object, element);
@@ -333,22 +310,6 @@
             renderState(window.currentState);
         }
 
-        function setLocked(id, locked) {
-            const object = window.currentState?.objects?.find(item => item.id === id);
-            if (!object || object.type !== "rectangle") return;
-
-            object.locked = locked;
-            renderState(window.currentState);
-
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({
-                    type: "lock",
-                    objectId: id,
-                    locked
-                }));
-            }
-        }
-
         function sendResize(id, width, height) {
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
             socket.send(JSON.stringify({ type: "resize", objectId: id, width, height }));
@@ -356,10 +317,7 @@
 
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
-                if (event.target.classList.contains("resize-handle") || event.target.classList.contains("lock-toggle")) return;
-
-                const object = window.currentState?.objects?.find(item => item.id === objectId);
-                if (object?.locked) return;
+                if (event.target.classList.contains("resize-handle")) return;
                 selectedObjectId = objectId;
                 for (const item of board.querySelectorAll(".object")) item.classList.toggle("selected", item.dataset.object === objectId);
                 const rect = board.getBoundingClientRect();
@@ -576,14 +534,6 @@
                         }
                     }
 
-                    if (data.type === "lock") {
-                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
-                        if (object) {
-                            object.locked = Boolean(data.locked);
-                            renderState(window.currentState);
-                        }
-                    }
-
                     if (data.type === "resize") {
                         const object = window.currentState?.objects?.find(item => item.id === data.objectId);
                         if (object) {
@@ -640,14 +590,7 @@
                 );
 
                 const discordSdk = new DiscordSDK(CLIENT_ID);
-                setStatus("Connecting to Discord…");
-
-                await Promise.race([
-                    discordSdk.ready(),
-                    new Promise((_, reject) =>
-                        setTimeout(() => reject(new Error("Discord SDK ready timeout")), 15000)
-                    )
-                ]);
+                await discordSdk.ready();
 
                 setStatus(`Discord connected (${discordSdk.instanceId})`);
                 connectToRoom(discordSdk.instanceId);
