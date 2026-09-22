@@ -227,7 +227,7 @@
         }
 
         function renderState(state) {
-            const objects = state.objects || [];
+            const objects = (state.objects || []).filter(object => object.type === "rectangle");
             const ids = new Set(objects.map(object => object.id));
 
             for (const element of board.querySelectorAll(".object")) {
@@ -313,17 +313,36 @@
         }
 
         function addRectangle() {
-            if (!socket || socket.readyState !== WebSocket.OPEN) {
-                setStatus("Not connected");
-                return;
-            }
-            socket.send(JSON.stringify({
-                type: "addRectangle",
+            const object = {
+                id: "local-rectangle-" + crypto.randomUUID(),
+                type: "rectangle",
                 x: 50,
                 y: 50,
                 width: 200,
                 height: 120
-            }));
+            };
+
+            if (!window.currentState) {
+                window.currentState = { version: 3, objects: [] };
+            }
+
+            window.currentState.objects.push(object);
+            selectedObjectId = object.id;
+            renderState(window.currentState);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "addRectangle",
+                    objectId: object.id,
+                    x: object.x,
+                    y: object.y,
+                    width: object.width,
+                    height: object.height
+                }));
+                setStatus("Rectangle added");
+            } else {
+                setStatus("Rectangle added locally — multiplayer not connected");
+            }
         }
         async function loadAssets() {
             const list = document.getElementById("assetList");
@@ -355,16 +374,27 @@
         }
 
         function applyAsset(path) {
-            if (!selectedObjectId || !socket || socket.readyState !== WebSocket.OPEN) return;
+            if (!selectedObjectId) return;
+
+            const object = window.currentState?.objects?.find(item => item.id === selectedObjectId);
+            if (!object || object.type !== "rectangle") return;
+
             const image = new Image();
             image.onload = () => {
-                socket.send(JSON.stringify({
-                    type: "setAsset",
-                    objectId: selectedObjectId,
-                    path,
-                    imageWidth: image.naturalWidth,
-                    imageHeight: image.naturalHeight
-                }));
+                object.texture = path;
+                object.aspectRatio = image.naturalWidth / image.naturalHeight;
+                object.height = object.width / object.aspectRatio;
+                renderState(window.currentState);
+
+                if (socket && socket.readyState === WebSocket.OPEN) {
+                    socket.send(JSON.stringify({
+                        type: "setAsset",
+                        objectId: selectedObjectId,
+                        path,
+                        imageWidth: image.naturalWidth,
+                        imageHeight: image.naturalHeight
+                    }));
+                }
             };
             image.src = path;
         }
@@ -391,12 +421,27 @@
                     const data = JSON.parse(event.data);
 
                     if (data.type === "state") {
-                        window.currentState = data.state;
-                        renderState(data.state);
+                        const serverObjects = (data.state.objects || []).filter(object => object.type === "rectangle");
+                        const localObjects = (window.currentState?.objects || []).filter(object => object.id.startsWith("local-"));
+                        window.currentState = {
+                            version: 3,
+                            objects: [...serverObjects, ...localObjects]
+                        };
+                        renderState(window.currentState);
                     }
 
-                    if (data.type === "objectAdded") {
-                        window.currentState.objects.push(data.object);
+                    if (data.type === "objectAdded" && data.object?.type === "rectangle") {
+                        const local = window.currentState?.objects?.find(object => object.id.startsWith("local-"));
+                        if (local) {
+                            local.id = data.object.id;
+                            local.x = data.object.x;
+                            local.y = data.object.y;
+                            local.width = data.object.width;
+                            local.height = data.object.height;
+                        } else {
+                            window.currentState.objects.push(data.object);
+                        }
+                        selectedObjectId = data.object.id;
                         renderState(window.currentState);
                     }
 
