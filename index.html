@@ -217,21 +217,7 @@
                 if (selectedObjectId === object.id) {
                     const handle = document.createElement("div");
                     handle.className = "resize-handle";
-                    handle.onpointerdown = event => startResize(event, object);
-                    handle.onpointermove = event => {
-                        if (!resizingObject || resizingObject.pointerId !== event.pointerId) return;
-                        const delta = event.clientX - resizingObject.startX;
-                        const width = Math.max(30, resizingObject.startWidth + delta);
-                        const height = width / resizingObject.ratio;
-                        resizingObject.object.width = width;
-                        resizingObject.object.height = height;
-                        element.style.width = width + "px";
-                        element.style.height = height + "px";
-                        sendResize(resizingObject.object.id, width, height);
-                    };
-                    handle.onpointerup = finishResize;
-                    handle.onpointercancel = finishResize;
-                    handle.onlostpointercapture = finishResize;
+                    handle.onpointerdown = event => startResize(event, object, element);
                     element.appendChild(handle);
                 }
             }
@@ -265,28 +251,54 @@
             }));
         }
 
-        function startResize(event, object) {
+        function startResize(event, object, element) {
             event.preventDefault();
             event.stopPropagation();
+
+            if (resizingObject) finishResize();
+
             resizingObject = {
                 object,
+                element,
                 pointerId: event.pointerId,
                 startX: event.clientX,
                 startWidth: object.width,
                 ratio: object.aspectRatio || (object.width / object.height)
             };
-            event.currentTarget.setPointerCapture(event.pointerId);
+
+            window.addEventListener("pointermove", handleResizeMove);
+            window.addEventListener("pointerup", finishResize);
+            window.addEventListener("pointercancel", finishResize);
+        }
+
+        function handleResizeMove(event) {
+            if (!resizingObject || resizingObject.pointerId !== event.pointerId) return;
+
+            event.preventDefault();
+
+            const delta = event.clientX - resizingObject.startX;
+            const width = Math.max(30, resizingObject.startWidth + delta);
+            const height = width / resizingObject.ratio;
+
+            resizingObject.object.width = width;
+            resizingObject.object.height = height;
+            resizingObject.element.style.width = width + "px";
+            resizingObject.element.style.height = height + "px";
+
+            sendResize(resizingObject.object.id, width, height);
         }
 
         function finishResize(event) {
             if (!resizingObject) return;
             if (event && event.pointerId !== undefined && resizingObject.pointerId !== event.pointerId) return;
 
-            sendResize(
-                resizingObject.object.id,
-                resizingObject.object.width,
-                resizingObject.object.height
-            );
+            const object = resizingObject.object;
+
+            window.removeEventListener("pointermove", handleResizeMove);
+            window.removeEventListener("pointerup", finishResize);
+            window.removeEventListener("pointercancel", finishResize);
+
+            sendResize(object.id, object.width, object.height);
             resizingObject = null;
             renderState(window.currentState);
         }
@@ -480,7 +492,10 @@
                         if (object) {
                             object.width = data.width;
                             object.height = data.height;
-                            renderState(window.currentState);
+
+                            if (!resizingObject || resizingObject.object.id !== data.objectId) {
+                                renderState(window.currentState);
+                            }
                         }
                     }
 
