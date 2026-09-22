@@ -352,7 +352,6 @@
                 selectedObjectId = objectId;
                 for (const item of board.querySelectorAll(".object")) item.classList.toggle("selected", item.dataset.object === objectId);
                 const rect = board.getBoundingClientRect();
-                const object = window.currentState?.objects?.find(item => item.id === objectId);
                 const startX = object ? object.x : parseFloat(element.style.left) || 50;
                 const startY = object ? object.y : parseFloat(element.style.top) || 50;
 
