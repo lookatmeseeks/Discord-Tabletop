@@ -106,7 +106,8 @@ export class TabletopRoom extends DurableObject {
         x: Number.isFinite(Number(data.x)) ? Math.max(0, Math.min(100, Number(data.x))) : 50,
         y: Number.isFinite(Number(data.y)) ? Math.max(0, Math.min(100, Number(data.y))) : 50,
         width: Math.max(30, Math.min(1000, Number(data.width) || 200)),
-        height: Math.max(30, Math.min(1000, Number(data.height) || 120))
+        height: Math.max(30, Math.min(1000, Number(data.height) || 120)),
+        layer: "foreground"
       };
 
       state.objects.push(object);
@@ -204,6 +205,30 @@ export class TabletopRoom extends DurableObject {
         type: "lock",
         objectId: object.id,
         locked: object.locked
+      });
+
+      for (const connected of this.sessions.keys()) {
+        try { connected.send(payload); } catch { this.sessions.delete(connected); }
+      }
+      return;
+    }
+
+    if (data?.type === "layer") {
+      const id = data.objectId;
+      const layer = data.layer === "background" ? "background" : "foreground";
+      if (!id) return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle") return;
+
+      object.layer = layer;
+      await this.saveState();
+
+      const payload = JSON.stringify({
+        type: "layer",
+        objectId: object.id,
+        layer: object.layer
       });
 
       for (const connected of this.sessions.keys()) {
