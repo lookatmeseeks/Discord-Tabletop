@@ -640,7 +640,14 @@
                 );
 
                 const discordSdk = new DiscordSDK(CLIENT_ID);
-                await discordSdk.ready();
+                setStatus("Connecting to Discord…");
+
+                await Promise.race([
+                    discordSdk.ready(),
+                    new Promise((_, reject) =>
+                        setTimeout(() => reject(new Error("Discord SDK ready timeout")), 15000)
+                    )
+                ]);
 
                 setStatus(`Discord connected (${discordSdk.instanceId})`);
                 connectToRoom(discordSdk.instanceId);
