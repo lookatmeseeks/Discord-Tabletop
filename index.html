@@ -253,7 +253,9 @@
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
                 selectedObjectId = objectId;
-                if (window.currentState) renderState(window.currentState);
+                for (const item of board.querySelectorAll(".object")) {
+                    item.classList.toggle("selected", item.dataset.object === objectId);
+                }
 
                 draggingObject = {
                     element,
