@@ -25,7 +25,7 @@ jobs:
           extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
           files = []
           if root.exists():
-              for path in sorted(root.rglob("*")):
+              for path in sorted(root.iterdir()):
                   if path.is_file() and path.suffix.lower() in extensions:
                       files.append(path.as_posix())
           manifest = {"assets": files}
