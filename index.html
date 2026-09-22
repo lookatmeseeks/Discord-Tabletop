@@ -319,15 +319,25 @@
                 if (event.target.classList.contains("resize-handle")) return;
                 selectedObjectId = objectId;
                 for (const item of board.querySelectorAll(".object")) item.classList.toggle("selected", item.dataset.object === objectId);
-                draggingObject = { element, pointerId: event.pointerId, id: objectId };
+                const elementRect = element.getBoundingClientRect();
+                const elementCenterX = elementRect.left + elementRect.width / 2;
+                const elementCenterY = elementRect.top + elementRect.height / 2;
+
+                draggingObject = {
+                    element,
+                    pointerId: event.pointerId,
+                    id: objectId,
+                    offsetX: event.clientX - elementCenterX,
+                    offsetY: event.clientY - elementCenterY
+                };
                 element.setPointerCapture(event.pointerId);
             };
 
             element.onpointermove = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
                 const rect = board.getBoundingClientRect();
-                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
-                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+                const x = Math.max(0, Math.min(100, ((event.clientX - draggingObject.offsetX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((event.clientY - draggingObject.offsetY - rect.top) / rect.height) * 100));
                 element.style.left = x + "%";
                 element.style.top = y + "%";
                 const object = window.currentState?.objects?.find(item => item.id === objectId);
@@ -342,8 +352,8 @@
             element.onpointerup = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
                 const rect = board.getBoundingClientRect();
-                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
-                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+                const x = Math.max(0, Math.min(100, ((event.clientX - draggingObject.offsetX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((event.clientY - draggingObject.offsetY - rect.top) / rect.height) * 100));
                 sendMove(objectId, x, y);
                 draggingObject = null;
             };
