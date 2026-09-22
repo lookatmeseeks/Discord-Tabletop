@@ -309,6 +309,11 @@
                 const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
                 element.style.left = x + "%";
                 element.style.top = y + "%";
+                const object = window.currentState?.objects?.find(item => item.id === objectId);
+                if (object) {
+                    object.x = x;
+                    object.y = y;
+                }
                 const now = performance.now();
                 if (now - lastSent >= 40) { lastSent = now; sendMove(objectId, x, y); }
             };
@@ -477,6 +482,11 @@
                     }
 
                     if (data.type === "move") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            object.x = data.x;
+                            object.y = data.y;
+                        }
                         const element = document.querySelector(`.object[data-object="${data.objectId}"]`);
                         if (element) {
                             element.style.left = `${data.x}%`;
