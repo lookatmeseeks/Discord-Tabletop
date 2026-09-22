@@ -17,7 +17,7 @@
 
         #status {
             position: fixed;
-            z-index: 10;
+            z-index: 100;
             top: 10px;
             left: 10px;
             padding: 6px 10px;
@@ -37,72 +37,191 @@
                         #35513f;
         }
 
-        .piece {
+        .object {
             position: absolute;
-            width: 60px;
-            height: 60px;
-            border-radius: 50%;
             transform: translate(-50%, -50%);
             display: flex;
             align-items: center;
             justify-content: center;
-            font-weight: bold;
-            background: white;
-            border: 3px solid #222;
             cursor: grab;
             user-select: none;
             touch-action: none;
+            box-sizing: border-box;
         }
 
-        .piece:active {
+        .object:active {
             cursor: grabbing;
+        }
+
+        .object.circle {
+            border-radius: 50%;
+            background: white;
+            border: 3px solid #222;
+            font-weight: bold;
+        }
+
+        .object.rectangle {
+            background: #777;
+            border: 3px solid #222;
+        }
+
+        .object.image {
+            background: transparent;
+        }
+
+        .object.image img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            pointer-events: none;
+        }
+
+        .object.text {
+            color: white;
+            background: rgba(0,0,0,.55);
+            border: 2px solid #222;
+            padding: 6px 10px;
+            min-width: 40px;
+            min-height: 24px;
+            white-space: nowrap;
         }
     </style>
 </head>
 
 <body>
     <div id="status">Connecting…</div>
-
-    <div id="board">
-        <div class="piece" data-piece="A" style="left:20%; top:30%;">A</div>
-        <div class="piece" data-piece="B" style="left:35%; top:65%;">B</div>
-        <div class="piece" data-piece="C" style="left:65%; top:30%;">C</div>
-        <div class="piece" data-piece="D" style="left:80%; top:65%;">D</div>
-    </div>
+    <div id="board"></div>
 
     <script type="module">
         const CLIENT_ID = "1551720640329814118";
         const DIRECT_WORKER_URL = "wss://discord-tabletop.animeister86.workers.dev/websocket";
         const ACTIVITY_PROXY_PATH = "/sync/websocket";
+
         const status = document.getElementById("status");
         const board = document.getElementById("board");
-        const pieces = document.querySelectorAll(".piece");
 
         let socket = null;
-        let connectedToDiscord = false;
-        let draggingPiece = null;
+        let draggingObject = null;
         let lastSent = 0;
 
         function setStatus(text) {
             status.textContent = text;
         }
 
-        function applyPosition(id, x, y) {
-            const piece = document.querySelector(`.piece[data-piece="${id}"]`);
-            if (!piece) return;
-            piece.style.left = `${x}%`;
-            piece.style.top = `${y}%`;
+        function renderObject(object) {
+            let element = document.querySelector(`.object[data-object="${object.id}"]`);
+
+            if (!element) {
+                element = document.createElement("div");
+                element.className = "object";
+                element.dataset.object = object.id;
+                board.appendChild(element);
+            }
+
+            element.className = `object ${object.type}`;
+            element.style.left = `${object.x}%`;
+            element.style.top = `${object.y}%`;
+            element.style.width = object.width ? `${object.width}px` : "";
+            element.style.height = object.height ? `${object.height}px` : "";
+
+            element.replaceChildren();
+
+            if (object.type === "circle") {
+                element.textContent = object.text || object.id;
+            }
+
+            if (object.type === "rectangle") {
+                if (object.texture) {
+                    element.style.backgroundImage = `url("${object.texture}")`;
+                    element.style.backgroundSize = "cover";
+                    element.style.backgroundRepeat = "repeat";
+                } else {
+                    element.style.backgroundImage = "";
+                }
+            }
+
+            if (object.type === "image") {
+                const image = document.createElement("img");
+                image.src = object.image || "";
+                image.alt = object.id;
+                element.appendChild(image);
+            }
+
+            if (object.type === "text") {
+                element.textContent = object.text || "";
+            }
+
+            attachDragHandlers(element, object.id);
         }
 
-        function applyState(state) {
-            for (const [id, position] of Object.entries(state.pieces || {})) {
-                applyPosition(id, position.x, position.y);
+        function renderState(state) {
+            const objects = state.objects || [];
+            const ids = new Set(objects.map(object => object.id));
+
+            for (const element of board.querySelectorAll(".object")) {
+                if (!ids.has(element.dataset.object)) {
+                    element.remove();
+                }
+            }
+
+            for (const object of objects) {
+                renderObject(object);
             }
         }
 
         function sendMove(id, x, y) {
             if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            socket.send(JSON.stringify({ type: "move", pieceId: id, x, y }));
+
+            socket.send(JSON.stringify({
+                type: "move",
+                objectId: id,
+                x,
+                y
+            }));
+        }
+
+        function attachDragHandlers(element, objectId) {
+            element.onpointerdown = event => {
+                draggingObject = {
+                    element,
+                    pointerId: event.pointerId,
+                    id: objectId
+                };
+
+                element.setPointerCapture(event.pointerId);
+            };
+
+            element.onpointermove = event => {
+                if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
+
+                const rect = board.getBoundingClientRect();
+                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+
+                element.style.left = `${x}%`;
+                element.style.top = `${y}%`;
+
+                const now = performance.now();
+                if (now - lastSent >= 40) {
+                    lastSent = now;
+                    sendMove(objectId, x, y);
+                }
+            };
+
+            element.onpointerup = event => {
+                if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
+
+                const rect = board.getBoundingClientRect();
+                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
+                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+
+                sendMove(objectId, x, y);
+                draggingObject = null;
+            };
+
+            element.onpointercancel = () => {
+                draggingObject = null;
+            };
         }
 
         function connectToRoom(roomId) {
@@ -110,8 +229,10 @@
             const baseUrl = isDiscordActivity
                 ? (window.location.protocol === "https:" ? "wss:" : "ws:") + "//" + window.location.host + ACTIVITY_PROXY_PATH
                 : DIRECT_WORKER_URL;
+
             const url = `${baseUrl}?room=${encodeURIComponent(roomId)}`;
             console.log("Connecting multiplayer WebSocket:", url);
+
             socket = new WebSocket(url);
 
             socket.addEventListener("open", () => {
@@ -121,8 +242,18 @@
             socket.addEventListener("message", event => {
                 try {
                     const data = JSON.parse(event.data);
-                    if (data.type === "state") applyState(data.state);
-                    if (data.type === "move") applyPosition(data.pieceId, data.x, data.y);
+
+                    if (data.type === "state") {
+                        renderState(data.state);
+                    }
+
+                    if (data.type === "move") {
+                        const element = document.querySelector(`.object[data-object="${data.objectId}"]`);
+                        if (element) {
+                            element.style.left = `${data.x}%`;
+                            element.style.top = `${data.y}%`;
+                        }
+                    }
                 } catch (error) {
                     console.error("Invalid server message", error);
                 }
@@ -149,7 +280,6 @@
                 const discordSdk = new DiscordSDK(CLIENT_ID);
                 await discordSdk.ready();
 
-                connectedToDiscord = true;
                 setStatus(`Discord connected (${discordSdk.instanceId})`);
                 connectToRoom(discordSdk.instanceId);
             } catch (error) {
@@ -157,50 +287,6 @@
                 setStatus("Local test mode");
             }
         }
-
-        pieces.forEach(piece => {
-            piece.addEventListener("pointerdown", event => {
-                draggingPiece = {
-                    piece,
-                    pointerId: event.pointerId,
-                    id: piece.dataset.piece
-                };
-
-                piece.setPointerCapture(event.pointerId);
-            });
-
-            piece.addEventListener("pointermove", event => {
-                if (!draggingPiece || draggingPiece.pointerId !== event.pointerId) return;
-
-                const rect = board.getBoundingClientRect();
-                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
-                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
-
-                piece.style.left = `${x}%`;
-                piece.style.top = `${y}%`;
-
-                const now = performance.now();
-                if (now - lastSent >= 40) {
-                    lastSent = now;
-                    sendMove(draggingPiece.id, x, y);
-                }
-            });
-
-            piece.addEventListener("pointerup", event => {
-                if (!draggingPiece || draggingPiece.pointerId !== event.pointerId) return;
-
-                const rect = board.getBoundingClientRect();
-                const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
-                const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
-
-                sendMove(draggingPiece.id, x, y);
-                draggingPiece = null;
-            });
-
-            piece.addEventListener("pointercancel", () => {
-                draggingPiece = null;
-            });
-        });
 
         setupDiscord();
     </script>
