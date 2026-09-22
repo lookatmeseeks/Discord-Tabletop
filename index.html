@@ -171,7 +171,7 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="deleteRectangle">Delete frame</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="deleteRectangle">Delete frame</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
     <div id="assets">
         <h3>Assets</h3>
         <div id="assetHint">Select a frame, then click an image.</div>
@@ -195,6 +195,8 @@
 
         const addRectangleButton = document.getElementById("addRectangle");
         const deleteRectangleButton = document.getElementById("deleteRectangle");
+        const sendBackgroundButton = document.getElementById("sendBackground");
+        const sendForegroundButton = document.getElementById("sendForeground");
 
         function setStatus(text) {
             status.textContent = text;
@@ -215,6 +217,7 @@
             element.style.top = `${object.y}%`;
             element.style.width = object.width ? `${object.width}px` : "";
             element.style.height = object.height ? `${object.height}px` : "";
+            element.style.zIndex = object.layer === "background" ? "0" : "1";
 
             element.replaceChildren();
             element.style.backgroundImage = "";
@@ -402,6 +405,24 @@
             element.onpointercancel = () => { draggingObject = null; };
         }
 
+        function setSelectedLayer(layer) {
+            if (!selectedObjectId) return;
+
+            const object = window.currentState?.objects?.find(item => item.id === selectedObjectId);
+            if (!object || object.type !== "rectangle" || object.layer === layer) return;
+
+            object.layer = layer;
+            renderState(window.currentState);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "layer",
+                    objectId: object.id,
+                    layer
+                }));
+            }
+        }
+
         function deleteSelectedRectangle() {
             if (!selectedObjectId) return;
 
@@ -431,7 +452,8 @@
                 x: 50,
                 y: 50,
                 width: 200,
-                height: 120
+                height: 120,
+                layer: "foreground"
             };
 
             if (!window.currentState) {
@@ -513,6 +535,8 @@
 
         addRectangleButton.onclick = addRectangle;
         deleteRectangleButton.onclick = deleteSelectedRectangle;
+        sendBackgroundButton.onclick = () => setSelectedLayer("background");
+        sendForegroundButton.onclick = () => setSelectedLayer("foreground");
 
         function connectToRoom(roomId) {
             const isDiscordActivity = window.location.hostname.endsWith(".discordsays.com");
@@ -564,6 +588,14 @@
                             object.texture = data.path;
                             object.aspectRatio = data.aspectRatio;
                             object.height = object.width / object.aspectRatio;
+                            renderState(window.currentState);
+                        }
+                    }
+
+                    if (data.type === "layer") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            object.layer = data.layer === "background" ? "background" : "foreground";
                             renderState(window.currentState);
                         }
                     }
