@@ -239,12 +239,10 @@
                     };
                     element.appendChild(lock);
 
-                    if (!object.locked) {
-                        const handle = document.createElement("div");
-                        handle.className = "resize-handle";
-                        handle.onpointerdown = event => startResize(event, object, element);
-                        element.appendChild(handle);
-                    }
+                    const handle = document.createElement("div");
+                    handle.className = "resize-handle";
+                    handle.onpointerdown = event => startResize(event, object, element);
+                    element.appendChild(handle);
                 }
             }
 
@@ -278,8 +276,6 @@
         }
 
         function startResize(event, object, element) {
-            if (object.locked) return;
-
             event.preventDefault();
             event.stopPropagation();
 
@@ -345,9 +341,6 @@
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
                 if (event.target.classList.contains("resize-handle")) return;
-
-                const object = window.currentState?.objects?.find(item => item.id === objectId);
-                if (object?.locked) return;
 
                 selectedObjectId = objectId;
                 for (const item of board.querySelectorAll(".object")) item.classList.toggle("selected", item.dataset.object === objectId);
