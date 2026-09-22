@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 
 const DEFAULT_STATE = {
-  version: 2,
+  version: 3,
   objects: []
 }
 
@@ -52,7 +52,7 @@ export class TabletopRoom extends DurableObject {
 
     const stored = await this.ctx.storage.get("state");
 
-    if (stored?.version === 2 && Array.isArray(stored.objects)) {
+    if (stored?.version === 3 && Array.isArray(stored.objects)) {
       this.state = stored;
     } else {
       this.state = structuredClone(DEFAULT_STATE);
