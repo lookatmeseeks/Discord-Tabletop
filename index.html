@@ -113,6 +113,32 @@
             z-index: 2;
         }
 
+        .rotate-handle {
+            position: absolute;
+            left: 50%;
+            top: -31px;
+            width: 16px;
+            height: 16px;
+            box-sizing: border-box;
+            transform: translateX(-50%);
+            border: 2px solid #fff;
+            border-radius: 50%;
+            background: #333;
+            cursor: grab;
+            z-index: 3;
+        }
+
+        .rotate-handle::after {
+            content: "";
+            position: absolute;
+            left: 50%;
+            top: 14px;
+            width: 2px;
+            height: 13px;
+            transform: translateX(-50%);
+            background: #fff;
+        }
+
         #toolbar {
             position: fixed;
             z-index: 110;
@@ -215,6 +241,7 @@
         let socket = null;
         let draggingObject = null;
         let resizingObject = null;
+        let rotatingObject = null;
         let selectedObjectId = null;
         let lastSent = 0;
 
@@ -243,6 +270,8 @@
             element.style.top = `${object.y}%`;
             element.style.width = object.width ? `${object.width}px` : "";
             element.style.height = object.height ? `${object.height}px` : "";
+            element.style.transform = `translate(-50%, -50%) rotate(${Number(object.rotation) || 0}deg)`;
+            element.style.transformOrigin = "center";
             element.style.zIndex = object.layer === "background" ? "0" : "1";
 
             element.replaceChildren();
@@ -274,6 +303,13 @@
                         }
                     };
                     element.appendChild(lock);
+
+                    const rotateHandle = document.createElement("div");
+                    rotateHandle.className = "rotate-handle";
+                    rotateHandle.title = "Rotate frame";
+                    rotateHandle.setAttribute("aria-label", "Rotate frame");
+                    rotateHandle.onpointerdown = event => startRotation(event, object, element);
+                    element.appendChild(rotateHandle);
 
                     const handle = document.createElement("div");
                     handle.className = "resize-handle";
@@ -395,6 +431,75 @@
             socket.send(JSON.stringify({ type: "resize", objectId: id, width, height }));
         }
 
+        function getPointerRotation(event, element) {
+            const rect = element.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+            return Math.atan2(event.clientY - centerY, event.clientX - centerX) * 180 / Math.PI + 90;
+        }
+
+        function startRotation(event, object, element) {
+            if (object.locked) return;
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (resizingObject) finishResize();
+            if (rotatingObject) finishRotation();
+
+            rotatingObject = {
+                object,
+                element,
+                pointerId: event.pointerId,
+                offset: getPointerRotation(event, element) - (Number(object.rotation) || 0)
+            };
+
+            element.setPointerCapture(event.pointerId);
+            window.addEventListener("pointermove", handleRotationMove);
+            window.addEventListener("pointerup", finishRotation);
+            window.addEventListener("pointercancel", finishRotation);
+        }
+
+        function handleRotationMove(event) {
+            if (!rotatingObject || rotatingObject.pointerId !== event.pointerId) return;
+            event.preventDefault();
+
+            const rotation = getPointerRotation(event, rotatingObject.element) - rotatingObject.offset;
+            const normalized = ((rotation % 360) + 360) % 360;
+            rotatingObject.object.rotation = normalized;
+            rotatingObject.element.style.transform = `translate(-50%, -50%) rotate(${normalized}deg)`;
+
+            const now = performance.now();
+            if (now - lastSent >= 40) {
+                lastSent = now;
+                sendRotation(rotatingObject.object.id, normalized);
+            }
+        }
+
+        function finishRotation(event) {
+            if (!rotatingObject) return;
+            if (event && event.pointerId !== undefined && rotatingObject.pointerId !== event.pointerId) return;
+
+            const rotationState = rotatingObject;
+            const object = rotationState.object;
+
+            window.removeEventListener("pointermove", handleRotationMove);
+            window.removeEventListener("pointerup", finishRotation);
+            window.removeEventListener("pointercancel", finishRotation);
+
+            if (rotationState.element.hasPointerCapture(rotationState.pointerId)) {
+                rotationState.element.releasePointerCapture(rotationState.pointerId);
+            }
+
+            sendRotation(object.id, object.rotation || 0);
+            rotatingObject = null;
+            renderState(window.currentState);
+        }
+
+        function sendRotation(id, rotation) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(JSON.stringify({ type: "rotate", objectId: id, rotation }));
+        }
+
         function attachDragHandlers(element, objectId) {
             element.onpointerdown = event => {
                 if (event.button === 1) return;
@@ -500,7 +605,8 @@
                 y: 50,
                 width: 200,
                 height: 120,
-                layer: "foreground"
+                layer: "foreground",
+                rotation: 0
             };
 
             if (!window.currentState) {
@@ -704,6 +810,7 @@
                             local.y = data.object.y;
                             local.width = data.object.width;
                             local.height = data.object.height;
+                            local.rotation = data.object.rotation || 0;
                         } else {
                             window.currentState.objects.push(data.object);
                         }
@@ -734,6 +841,17 @@
                         if (object) {
                             object.locked = Boolean(data.locked);
                             renderState(window.currentState);
+                        }
+                    }
+
+                    if (data.type === "rotate") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            object.rotation = Number(data.rotation) || 0;
+                            const element = document.querySelector(`.object[data-object="${data.objectId}"]`);
+                            if (element) {
+                                element.style.transform = `translate(-50%, -50%) rotate(${object.rotation}deg)`;
+                            }
                         }
                     }
 
