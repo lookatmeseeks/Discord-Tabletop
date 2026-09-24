@@ -163,7 +163,8 @@ export class TabletopRoom extends DurableObject {
         y: Number.isFinite(Number(data.y)) ? Math.max(0, Math.min(100, Number(data.y))) : 50,
         width: Math.max(30, Math.min(1000, Number(data.width) || 200)),
         height: Math.max(30, Math.min(1000, Number(data.height) || 120)),
-        layer: "foreground"
+        layer: "foreground",
+        rotation: 0
       };
 
       state.objects.push(object);
@@ -257,6 +258,26 @@ export class TabletopRoom extends DurableObject {
         objectId: object.id,
         layer: object.layer
       }));
+      return;
+    }
+
+    if (data?.type === "rotate") {
+      const id = data.objectId;
+      const rotation = Number(data.rotation);
+      if (!id || !Number.isFinite(rotation)) return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle") return;
+
+      object.rotation = ((rotation % 360) + 360) % 360;
+
+      this.broadcast(JSON.stringify({
+        type: "rotate",
+        objectId: object.id,
+        rotation: object.rotation
+      }));
+
       return;
     }
 
