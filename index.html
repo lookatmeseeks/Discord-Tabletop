@@ -139,6 +139,61 @@
             background: #fff;
         }
 
+        .frame-note {
+            width: 100%;
+            max-height: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            overflow: hidden;
+            color: #fff;
+            font-size: 14px;
+            line-height: 1.25;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            text-align: left;
+            pointer-events: none;
+            text-shadow: 0 1px 2px #000;
+        }
+
+        #noteEditor {
+            position: fixed;
+            z-index: 120;
+            left: 10px;
+            top: 82px;
+            width: 280px;
+            padding: 8px;
+            box-sizing: border-box;
+            border-radius: 8px;
+            background: rgba(0,0,0,.82);
+            color: white;
+        }
+
+        #noteEditor[hidden] {
+            display: none;
+        }
+
+        #noteEditor label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 12px;
+            opacity: .8;
+        }
+
+        #frameNote {
+            display: block;
+            width: 100%;
+            min-height: 100px;
+            box-sizing: border-box;
+            padding: 7px;
+            border: 1px solid #555;
+            border-radius: 5px;
+            background: #222;
+            color: #fff;
+            font: inherit;
+            font-size: 14px;
+            resize: vertical;
+        }
+
         #toolbar {
             position: fixed;
             z-index: 110;
@@ -215,7 +270,11 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="saveBoard">Save</button> <button id="deleteRectangle">Delete frame</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="saveBoard">Save</button> <button id="deleteRectangle">Delete frame</button> <button id="toggleNote">Note</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
+    <div id="noteEditor" hidden>
+        <label for="frameNote">Frame note</label>
+        <textarea id="frameNote" placeholder="Write a note for this frame…"></textarea>
+    </div>
     <div id="assets">
         <h3>Assets</h3>
         <div id="assetHint">Select a frame, then click an image.</div>
@@ -250,6 +309,11 @@
         const sendBackgroundButton = document.getElementById("sendBackground");
         const sendForegroundButton = document.getElementById("sendForeground");
         const saveBoardButton = document.getElementById("saveBoard");
+        const toggleNoteButton = document.getElementById("toggleNote");
+        const noteEditor = document.getElementById("noteEditor");
+        const frameNote = document.getElementById("frameNote");
+        let noteEditorOpen = false;
+        let noteSendTimer = null;
 
         function setStatus(text) {
             status.textContent = text;
@@ -278,6 +342,13 @@
             element.style.backgroundImage = "";
             element.style.backgroundSize = "100% 100%";
             element.classList.toggle("has-texture", Boolean(object.texture));
+
+            if (object.note) {
+                const note = document.createElement("div");
+                note.className = "frame-note";
+                note.textContent = object.note;
+                element.appendChild(note);
+            }
 
             if (object.type === "rectangle") {
                 if (object.texture) {
@@ -510,6 +581,7 @@
 
                 selectedObjectId = objectId;
                 renderObject(object);
+                updateNoteEditor();
 
                 if (object.locked) return;
 
@@ -557,6 +629,53 @@
             element.onpointercancel = () => { draggingObject = null; };
         }
 
+        function updateNoteEditor() {
+            const object = window.currentState?.objects?.find(item => item.id === selectedObjectId);
+            if (!object || object.type !== "rectangle") {
+                noteEditor.hidden = true;
+                noteEditorOpen = false;
+                return;
+            }
+
+            frameNote.value = object.note || "";
+            noteEditor.hidden = !noteEditorOpen;
+        }
+
+        function toggleNoteEditor() {
+            const object = window.currentState?.objects?.find(item => item.id === selectedObjectId);
+            if (!object || object.type !== "rectangle") {
+                setStatus("Select a frame first");
+                return;
+            }
+
+            noteEditorOpen = !noteEditorOpen;
+            updateNoteEditor();
+
+            if (noteEditorOpen) {
+                frameNote.focus();
+                frameNote.setSelectionRange(frameNote.value.length, frameNote.value.length);
+            }
+        }
+
+        function sendNote(id, note) {
+            if (!socket || socket.readyState !== WebSocket.OPEN) return;
+            socket.send(JSON.stringify({ type: "note", objectId: id, note }));
+        }
+
+        function handleNoteInput() {
+            const object = window.currentState?.objects?.find(item => item.id === selectedObjectId);
+            if (!object || object.type !== "rectangle") return;
+
+            object.note = frameNote.value.slice(0, 10000);
+            renderObject(object);
+
+            if (noteSendTimer) clearTimeout(noteSendTimer);
+            noteSendTimer = setTimeout(() => {
+                noteSendTimer = null;
+                sendNote(object.id, object.note);
+            }, 100);
+        }
+
         function setSelectedLayer(layer) {
             if (!selectedObjectId) return;
 
@@ -584,6 +703,8 @@
 
             window.currentState.objects = window.currentState.objects.filter(item => item.id !== objectId);
             selectedObjectId = null;
+            noteEditorOpen = false;
+            updateNoteEditor();
             renderState(window.currentState);
 
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -748,6 +869,8 @@
         deleteRectangleButton.onclick = deleteSelectedRectangle;
         sendBackgroundButton.onclick = () => setSelectedLayer("background");
         sendForegroundButton.onclick = () => setSelectedLayer("foreground");
+        toggleNoteButton.onclick = toggleNoteEditor;
+        frameNote.addEventListener("input", handleNoteInput);
         saveBoardButton.onclick = saveBoard;
 
         function saveBoard() {
@@ -800,6 +923,7 @@
                             objects: [...serverObjects, ...localObjects]
                         };
                         renderState(window.currentState);
+                        updateNoteEditor();
                     }
 
                     if (data.type === "objectAdded" && data.object?.type === "rectangle") {
@@ -811,6 +935,7 @@
                             local.width = data.object.width;
                             local.height = data.object.height;
                             local.rotation = data.object.rotation || 0;
+                            local.note = data.object.note || "";
                         } else {
                             window.currentState.objects.push(data.object);
                         }
@@ -844,6 +969,17 @@
                         }
                     }
 
+                    if (data.type === "note") {
+                        const object = window.currentState?.objects?.find(item => item.id === data.objectId);
+                        if (object) {
+                            object.note = typeof data.note === "string" ? data.note : "";
+                            renderObject(object);
+                            if (selectedObjectId === object.id) {
+                                frameNote.value = object.note;
+                            }
+                        }
+                    }
+
                     if (data.type === "rotate") {
                         const object = window.currentState?.objects?.find(item => item.id === data.objectId);
                         if (object) {
@@ -873,6 +1009,7 @@
                             selectedObjectId = null;
                         }
                         renderState(window.currentState);
+                        updateNoteEditor();
                     }
 
                     if (data.type === "move") {
