@@ -88,6 +88,11 @@
             outline-offset: 3px;
         }
 
+        .object.multi-selected {
+            outline: 3px dashed #ffd166;
+            outline-offset: 4px;
+        }
+
         .lock-toggle {
             position: absolute;
             top: -9px;
@@ -270,7 +275,7 @@
 
 <body>
     <div id="status">Connecting…</div>
-    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="saveBoard">Save</button> <button id="deleteRectangle">Delete frame</button> <button id="toggleNote">Note</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
+    <div id="toolbar"><button id="addRectangle">Add frame</button> <button id="saveBoard">Save</button> <button id="deleteRectangle">Delete frame</button> <button id="toggleNote">Note</button> <button id="connectFrames">Connect</button> <button id="disconnectFrames">Disconnect</button> <button id="sendBackground">Background</button> <button id="sendForeground">Foreground</button></div>
     <div id="noteEditor" hidden>
         <label for="frameNote">Frame note</label>
         <textarea id="frameNote" placeholder="Write a note for this frame…"></textarea>
@@ -302,6 +307,7 @@
         let resizingObject = null;
         let rotatingObject = null;
         let selectedObjectId = null;
+        const selectedObjectIds = new Set();
         let lastSent = 0;
 
         const addRectangleButton = document.getElementById("addRectangle");
@@ -310,6 +316,8 @@
         const sendForegroundButton = document.getElementById("sendForeground");
         const saveBoardButton = document.getElementById("saveBoard");
         const toggleNoteButton = document.getElementById("toggleNote");
+        const connectFramesButton = document.getElementById("connectFrames");
+        const disconnectFramesButton = document.getElementById("disconnectFrames");
         const noteEditor = document.getElementById("noteEditor");
         const frameNote = document.getElementById("frameNote");
         let noteEditorOpen = false;
@@ -329,7 +337,10 @@
                 world.appendChild(element);
             }
 
-            element.className = `object ${object.type}${selectedObjectId === object.id ? " selected" : ""}`;
+            const selectionClass = selectedObjectIds.has(object.id)
+                ? (selectedObjectId === object.id ? " selected multi-selected" : " multi-selected")
+                : "";
+            element.className = `object ${object.type}${selectionClass}`;
             element.style.left = `${object.x}%`;
             element.style.top = `${object.y}%`;
             element.style.width = object.width ? `${object.width}px` : "";
@@ -436,6 +447,105 @@
                 x,
                 y
             }));
+        }
+
+        function getLinkedObjects(objectId) {
+            const object = window.currentState?.objects?.find(item => item.id === objectId);
+            if (!object?.linkId) return object ? [object] : [];
+
+            return (window.currentState?.objects || []).filter(item =>
+                item.type === "rectangle" && item.linkId === object.linkId
+            );
+        }
+
+        function updateSelectionControls() {
+            connectFramesButton.disabled = selectedObjectIds.size !== 2;
+            disconnectFramesButton.disabled = selectedObjectIds.size === 0;
+        }
+
+        function clearSelection() {
+            selectedObjectIds.clear();
+            selectedObjectIds.delete(objectId);
+            selectedObjectId = selectedObjectIds.values().next().value || null;
+        }
+
+        function selectObject(objectId, additive = false) {
+            if (!additive) selectedObjectIds.clear();
+
+            if (additive && selectedObjectIds.has(objectId)) {
+                selectedObjectIds.delete(objectId);
+                if (selectedObjectId === objectId) {
+                    selectedObjectId = selectedObjectIds.values().next().value || null;
+                }
+            } else {
+                selectedObjectIds.add(objectId);
+                selectedObjectId = objectId;
+            }
+
+            updateSelectionControls();
+        }
+
+        function connectSelectedFrames() {
+            if (selectedObjectIds.size !== 2) {
+                setStatus("Select exactly 2 frames");
+                return;
+            }
+
+            const ids = [...selectedObjectIds];
+            const objects = ids.map(id => window.currentState?.objects?.find(item => item.id === id)).filter(Boolean);
+
+            if (objects.length !== 2) return;
+            if (objects.some(object => object.locked)) {
+                setStatus("Unlock both frames before connecting");
+                return;
+            }
+            if (objects.some(object => object.linkId)) {
+                setStatus("One of these frames is already connected");
+                return;
+            }
+
+            const linkId = "link-" + crypto.randomUUID();
+            for (const object of objects) object.linkId = linkId;
+
+            renderState(window.currentState);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "link",
+                    objectIds: ids,
+                    linkId
+                }));
+                setStatus("Frames connected");
+            } else {
+                setStatus("Frames connected locally — multiplayer not connected");
+            }
+        }
+
+        function disconnectSelectedFrames() {
+            const ids = [...selectedObjectIds];
+            if (!ids.length) return;
+
+            const objects = ids
+                .map(id => window.currentState?.objects?.find(item => item.id === id))
+                .filter(object => object?.type === "rectangle" && object.linkId);
+
+            if (!objects.length) {
+                setStatus("Selected frames are not connected");
+                return;
+            }
+
+            for (const object of objects) delete object.linkId;
+            renderState(window.currentState);
+
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({
+                    type: "unlink",
+                    objectIds: objects.map(object => object.id)
+                }));
+                setStatus("Frames disconnected");
+            } else {
+                setStatus("Frames disconnected locally — multiplayer not connected");
+            }
         }
 
         function startResize(event, object, element) {
@@ -575,18 +685,31 @@
             element.onpointerdown = event => {
                 if (event.button === 1) return;
                 if (event.target.classList.contains("resize-handle")) return;
+                if (event.target.classList.contains("rotate-handle")) return;
+                if (event.target.classList.contains("lock-toggle")) return;
 
                 const object = window.currentState?.objects?.find(item => item.id === objectId);
                 if (!object) return;
 
-                selectedObjectId = objectId;
-                renderObject(object);
+                const additiveSelection = event.ctrlKey || event.metaKey || event.shiftKey;
+                if (additiveSelection) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    selectObject(objectId, true);
+                    renderState(window.currentState);
+                    updateNoteEditor();
+                    return;
+                }
+
+                selectObject(objectId);
+                renderState(window.currentState);
                 updateNoteEditor();
 
-                if (object.locked) return;
-
-                const startX = object.x;
-                const startY = object.y;
+                const linkedObjects = getLinkedObjects(objectId);
+                if (linkedObjects.some(item => item.locked)) {
+                    setStatus("Unlock all connected frames before moving them");
+                    return;
+                }
 
                 draggingObject = {
                     element,
@@ -594,36 +717,51 @@
                     id: objectId,
                     startClientX: event.clientX,
                     startClientY: event.clientY,
-                    startX,
-                    startY
+                    members: linkedObjects.map(item => ({
+                        id: item.id,
+                        startX: item.x,
+                        startY: item.y
+                    }))
                 };
                 element.setPointerCapture(event.pointerId);
             };
 
             element.onpointermove = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
+
                 const deltaX = ((event.clientX - draggingObject.startClientX) / zoom) / WORLD_SIZE * 100;
                 const deltaY = ((event.clientY - draggingObject.startClientY) / zoom) / WORLD_SIZE * 100;
-                const x = Math.max(0, Math.min(100, draggingObject.startX + deltaX));
-                const y = Math.max(0, Math.min(100, draggingObject.startY + deltaY));
-                element.style.left = x + "%";
-                element.style.top = y + "%";
-                const object = window.currentState?.objects?.find(item => item.id === objectId);
-                if (object) {
-                    object.x = x;
-                    object.y = y;
+
+                for (const member of draggingObject.members) {
+                    const object = window.currentState?.objects?.find(item => item.id === member.id);
+                    if (!object) continue;
+
+                    object.x = Math.max(0, Math.min(100, member.startX + deltaX));
+                    object.y = Math.max(0, Math.min(100, member.startY + deltaY));
+
+                    const memberElement = document.querySelector(`.object[data-object="${member.id}"]`);
+                    if (memberElement) {
+                        memberElement.style.left = object.x + "%";
+                        memberElement.style.top = object.y + "%";
+                    }
                 }
+
+                const movedObject = window.currentState?.objects?.find(item => item.id === objectId);
                 const now = performance.now();
-                if (now - lastSent >= 40) { lastSent = now; sendMove(objectId, x, y); }
+                if (movedObject && now - lastSent >= 40) {
+                    lastSent = now;
+                    sendMove(objectId, movedObject.x, movedObject.y);
+                }
             };
 
             element.onpointerup = event => {
                 if (!draggingObject || draggingObject.pointerId !== event.pointerId) return;
-                const deltaX = ((event.clientX - draggingObject.startClientX) / zoom) / WORLD_SIZE * 100;
-                const deltaY = ((event.clientY - draggingObject.startClientY) / zoom) / WORLD_SIZE * 100;
-                const x = Math.max(0, Math.min(100, draggingObject.startX + deltaX));
-                const y = Math.max(0, Math.min(100, draggingObject.startY + deltaY));
-                sendMove(objectId, x, y);
+
+                const movedObject = window.currentState?.objects?.find(item => item.id === objectId);
+                if (movedObject) {
+                    sendMove(objectId, movedObject.x, movedObject.y);
+                }
+
                 draggingObject = null;
             };
             element.onpointercancel = () => { draggingObject = null; };
@@ -735,7 +873,10 @@
             }
 
             window.currentState.objects.push(object);
+            clearSelection();
+            selectedObjectIds.add(object.id);
             selectedObjectId = object.id;
+            updateSelectionControls();
             renderState(window.currentState);
 
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -867,6 +1008,8 @@
 
         addRectangleButton.onclick = addRectangle;
         deleteRectangleButton.onclick = deleteSelectedRectangle;
+        connectFramesButton.onclick = connectSelectedFrames;
+        disconnectFramesButton.onclick = disconnectSelectedFrames;
         sendBackgroundButton.onclick = () => setSelectedLayer("background");
         sendForegroundButton.onclick = () => setSelectedLayer("foreground");
         toggleNoteButton.onclick = toggleNoteEditor;
@@ -922,6 +1065,15 @@
                             version: 3,
                             objects: [...serverObjects, ...localObjects]
                         };
+                        for (const id of [...selectedObjectIds]) {
+                            if (!window.currentState.objects.some(object => object.id === id)) {
+                                selectedObjectIds.delete(id);
+                            }
+                        }
+                        if (selectedObjectId && !selectedObjectIds.has(selectedObjectId)) {
+                            selectedObjectId = selectedObjectIds.values().next().value || null;
+                        }
+                        updateSelectionControls();
                         renderState(window.currentState);
                         updateNoteEditor();
                     }
@@ -1012,16 +1164,51 @@
                         updateNoteEditor();
                     }
 
+                    if (data.type === "link") {
+                        for (const objectId of data.objectIds || []) {
+                            const object = window.currentState?.objects?.find(item => item.id === objectId);
+                            if (object) object.linkId = data.linkId;
+                        }
+                        renderState(window.currentState);
+                    }
+
+                    if (data.type === "unlink") {
+                        for (const objectId of data.objectIds || []) {
+                            const object = window.currentState?.objects?.find(item => item.id === objectId);
+                            if (object) delete object.linkId;
+                        }
+                        renderState(window.currentState);
+                    }
+
                     if (data.type === "move") {
                         const object = window.currentState?.objects?.find(item => item.id === data.objectId);
                         if (object) {
                             object.x = data.x;
                             object.y = data.y;
+
+                            if (object.linkId) {
+                                const previousX = Number(data.previousX);
+                                const previousY = Number(data.previousY);
+                                if (Number.isFinite(previousX) && Number.isFinite(previousY)) {
+                                    const deltaX = object.x - previousX;
+                                    const deltaY = object.y - previousY;
+                                    for (const linked of window.currentState.objects) {
+                                        if (linked.id === object.id || linked.type !== "rectangle" || linked.linkId !== object.linkId) continue;
+                                        linked.x = Math.max(0, Math.min(100, linked.x + deltaX));
+                                        linked.y = Math.max(0, Math.min(100, linked.y + deltaY));
+                                    }
+                                }
+                            }
                         }
-                        const element = document.querySelector(`.object[data-object="${data.objectId}"]`);
-                        if (element) {
-                            element.style.left = `${data.x}%`;
-                            element.style.top = `${data.y}%`;
+
+                        for (const item of window.currentState?.objects || []) {
+                            if (item.id === data.objectId || (object?.linkId && item.linkId === object.linkId)) {
+                                const itemElement = document.querySelector(`.object[data-object="${item.id}"]`);
+                                if (itemElement) {
+                                    itemElement.style.left = `${item.x}%`;
+                                    itemElement.style.top = `${item.y}%`;
+                                }
+                            }
                         }
                     }
                 } catch (error) {
