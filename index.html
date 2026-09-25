@@ -465,8 +465,8 @@
 
         function clearSelection() {
             selectedObjectIds.clear();
-            selectedObjectIds.delete(objectId);
-            selectedObjectId = selectedObjectIds.values().next().value || null;
+            selectedObjectId = null;
+            updateSelectionControls();
         }
 
         function selectObject(objectId, additive = false) {
