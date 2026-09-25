@@ -840,7 +840,9 @@
             if (!object || object.type !== "rectangle") return;
 
             window.currentState.objects = window.currentState.objects.filter(item => item.id !== objectId);
-            selectedObjectId = null;
+            selectedObjectIds.delete(objectId);
+            selectedObjectId = selectedObjectIds.values().next().value || null;
+            updateSelectionControls();
             noteEditorOpen = false;
             updateNoteEditor();
             renderState(window.currentState);
@@ -1180,35 +1182,31 @@
                         renderState(window.currentState);
                     }
 
+                    if (data.type === "groupMove") {
+                        for (const moved of data.objects || []) {
+                            const object = window.currentState?.objects?.find(item => item.id === moved.id);
+                            if (!object) continue;
+                            object.x = moved.x;
+                            object.y = moved.y;
+
+                            const element = document.querySelector(`.object[data-object="${moved.id}"]`);
+                            if (element) {
+                                element.style.left = `${moved.x}%`;
+                                element.style.top = `${moved.y}%`;
+                            }
+                        }
+                    }
+
                     if (data.type === "move") {
                         const object = window.currentState?.objects?.find(item => item.id === data.objectId);
                         if (object) {
                             object.x = data.x;
                             object.y = data.y;
-
-                            if (object.linkId) {
-                                const previousX = Number(data.previousX);
-                                const previousY = Number(data.previousY);
-                                if (Number.isFinite(previousX) && Number.isFinite(previousY)) {
-                                    const deltaX = object.x - previousX;
-                                    const deltaY = object.y - previousY;
-                                    for (const linked of window.currentState.objects) {
-                                        if (linked.id === object.id || linked.type !== "rectangle" || linked.linkId !== object.linkId) continue;
-                                        linked.x = Math.max(0, Math.min(100, linked.x + deltaX));
-                                        linked.y = Math.max(0, Math.min(100, linked.y + deltaY));
-                                    }
-                                }
-                            }
                         }
-
-                        for (const item of window.currentState?.objects || []) {
-                            if (item.id === data.objectId || (object?.linkId && item.linkId === object.linkId)) {
-                                const itemElement = document.querySelector(`.object[data-object="${item.id}"]`);
-                                if (itemElement) {
-                                    itemElement.style.left = `${item.x}%`;
-                                    itemElement.style.top = `${item.y}%`;
-                                }
-                            }
+                        const element = document.querySelector(`.object[data-object="${data.objectId}"]`);
+                        if (element) {
+                            element.style.left = `${data.x}%`;
+                            element.style.top = `${data.y}%`;
                         }
                     }
                 } catch (error) {
@@ -1246,6 +1244,7 @@
             }
         }
 
+        updateSelectionControls();
         centerWorld();
         loadAssets();
         setupDiscord();
