@@ -323,6 +323,43 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "link") {
+      const objectIds = Array.isArray(data.objectIds) ? data.objectIds.slice(0, 2) : [];
+      const linkId = typeof data.linkId === "string" ? data.linkId.slice(0, 100) : "";
+      if (objectIds.length !== 2 || new Set(objectIds).size !== 2 || !linkId) return;
+
+      const state = await this.getState();
+      const objects = objectIds.map(id => state.objects.find(item => item.id === id));
+      if (objects.some(object => !object || object.type !== "rectangle")) return;
+      if (objects.some(object => object.locked || object.linkId)) return;
+
+      for (const object of objects) object.linkId = linkId;
+
+      this.broadcast(JSON.stringify({
+        type: "link",
+        objectIds,
+        linkId
+      }));
+      return;
+    }
+
+    if (data?.type === "unlink") {
+      const objectIds = Array.isArray(data.objectIds) ? data.objectIds.slice(0, 20) : [];
+      if (!objectIds.length) return;
+
+      const state = await this.getState();
+      for (const objectId of objectIds) {
+        const object = state.objects.find(item => item.id === objectId);
+        if (object) delete object.linkId;
+      }
+
+      this.broadcast(JSON.stringify({
+        type: "unlink",
+        objectIds
+      }));
+      return;
+    }
+
     if (data?.type !== "move") return;
 
     const id = data.objectId;
@@ -336,8 +373,35 @@ export class TabletopRoom extends DurableObject {
 
     if (!object) return;
 
+    const previousX = object.x;
+    const previousY = object.y;
     object.x = Math.max(0, Math.min(100, x));
     object.y = Math.max(0, Math.min(100, y));
+
+    const deltaX = object.x - previousX;
+    const deltaY = object.y - previousY;
+
+    if (object.linkId) {
+      const movedObjects = [];
+      for (const linked of state.objects) {
+        if (linked.type !== "rectangle" || linked.linkId !== object.linkId) continue;
+        if (linked.id !== object.id) {
+          linked.x = Math.max(0, Math.min(100, linked.x + deltaX));
+          linked.y = Math.max(0, Math.min(100, linked.y + deltaY));
+        }
+        movedObjects.push({
+          id: linked.id,
+          x: linked.x,
+          y: linked.y
+        });
+      }
+
+      this.broadcast(JSON.stringify({
+        type: "groupMove",
+        objects: movedObjects
+      }));
+      return;
+    }
 
     this.broadcast(JSON.stringify({
       type: "move",
