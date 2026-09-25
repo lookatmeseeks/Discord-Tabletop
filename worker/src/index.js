@@ -261,6 +261,25 @@ export class TabletopRoom extends DurableObject {
       return;
     }
 
+    if (data?.type === "note") {
+      const id = data.objectId;
+      const note = typeof data.note === "string" ? data.note.slice(0, 10000) : "";
+      if (!id) return;
+
+      const state = await this.getState();
+      const object = state.objects.find(item => item.id === id);
+      if (!object || object.type !== "rectangle") return;
+
+      object.note = note;
+
+      this.broadcast(JSON.stringify({
+        type: "note",
+        objectId: object.id,
+        note: object.note
+      }));
+      return;
+    }
+
     if (data?.type === "rotate") {
       const id = data.objectId;
       const rotation = Number(data.rotation);
